@@ -7,7 +7,7 @@ After=network-online.target
 [Service]
 Type=simple
 StandardOutput=null
-ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf
+ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf; sleep 1; /usr/sbin/asterisk -rx 'module load chan_echolink.so'
 ExecStop=/usr/sbin/asterisk -rx 'stop now'
 ExecReload=/usr/sbin/asterisk -rx 'module reload'
 
