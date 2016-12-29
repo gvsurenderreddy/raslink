@@ -49,5 +49,4 @@ fi
 ln -fs /etc/network/if-up.d/ntpdate /etc/cron.hourly/ntpdate
 service cron restart
 echo "Done"
-
 exit 0
