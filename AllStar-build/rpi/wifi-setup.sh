@@ -16,8 +16,7 @@ sleep 0.5
 echo "Please enter the Wi-Fi card name from the list below:"
 ifconfig | grep wlan
 read -e -p "[wlan0] : " wificard
-if [ "$wificard" = "" ]
-then
+if [ "$wificard" = "" ]; then
   wificard=wlan0
 fi
 sleep 0.5
