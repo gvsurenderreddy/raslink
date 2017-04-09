@@ -15,7 +15,7 @@ mv /root/.bashrc.orig /root/.bashrc
 if [ `grep -ic "/usr/bin/version" /root/.bashrc` >= 1 ]; then
   sed -i '/\/usr\/bin\/version/d' /root/.bashrc
 fi
-if [ `grep -ic "/usr/bin/version" /root/.profile` <= 0 ]; then
+if [ `grep -ic "/usr/bin/version" /root/.profile` == 0 ]; then
   echo "/usr/bin/version" >> /root/.profile
 fi
 chmod +x /usr/src/utils/AllStar-build/rpi/chk-packages.sh
