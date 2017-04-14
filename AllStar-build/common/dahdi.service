@@ -1,0 +1,18 @@
+[Unit]
+Description=Digium Advanced Hardware Device Interface Kernel Module
+Wants=network.target
+After=network-online.target
+
+[Service]
+Type=simple
+StandardOutput=null
+ExecStart=/sbin/modprobe dahdi
+ExecStop=/sbin/modprobe -r dahdi
+
+# safe_asterisk emulation
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+

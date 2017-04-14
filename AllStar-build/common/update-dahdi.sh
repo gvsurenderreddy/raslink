@@ -22,10 +22,9 @@ patch -p1 < /usr/src/utils/AllStar-build/patches/patch-dahdi-dude-current
 # remove setting the owner to asterisk
 patch -p0 < /usr/src/utils/AllStar-build/patches/patch-dahdi.rules
 # Build and install dahdi
-make; make install; make config
-if [ "$(grep -ic "dahdi" /etc/modules)" == "0" ]; then
-  echo "dahdi" >> /etc/modules
-  modprobe dahdi
+(make;make install;make config)
+if [ "$(grep -ic "dahdi" /etc/modules)" == "1" ]; then
+  sed -i '/dahdi/d' /etc/modules
 fi
 echo "Done"
 exit 0
