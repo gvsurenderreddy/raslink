@@ -7,13 +7,10 @@ cd /usr/src/utils/astsrc/libpri/
 # Patch libpri for use with AllStar
 patch </usr/src/utils/AllStar-build/patches/patch-libpri-makefile
 # Build and install libpri
-(make;make install)
-cp /usr/src/utils/AllStar-build/common/dahdi.service /etc/systemd/system
-if [ -f /etc/init.d/dahdi ]; then
-  update-rc.d dahdi remove
-  rm -rf /etc/init.d/dahdi
-fi
+make; make install
+cp /usr/src/utils/AllStar-build/common/dahdi /etc/init.d
+update-rc.d dahdi defaults
 systemctl daemon-reload
-systemctl start dahdi.service
+systemctl start dahdi
 echo "Done"
 exit 0

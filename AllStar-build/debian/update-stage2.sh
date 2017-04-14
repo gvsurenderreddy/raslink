@@ -53,8 +53,9 @@ cd /usr/src/utils
 echo "Done"
 sleep 0.5
 echo "Updating system boot configuration..."
+cp /usr/src/utils/AllStar-build/debian/boot-config.txt /boot/config.txt
+cp /usr/src/utils/AllStar-build/debian/etc-asound.conf /etc/asound.conf
 cp /usr/src/utils/AllStar-build/common/asterisk.service /etc/systemd/system
-cp /usr/src/utils/AllStar-build/common/dahdi.service /etc/systemd/system
 cp /usr/src/utils/AllStar-build/common/asterisk.timer /etc/systemd/system
 cp /usr/src/utils/AllStar-build/common/dahdi.timer /etc/systemd/system
 cp /usr/src/utils/AllStar-build/common/updatenodelist.service /etc/systemd/system
@@ -76,7 +77,7 @@ echo "You can run this tool at any time by typing 'system-update' at a root prom
 echo "Re-enabling your node..."
 sync
 sleep 1
-(service asterisk start;service updatenodelist start) &>/dev/null
+(/boot/config.txt;service asterisk start;service updatenodelist start) &>/dev/null
 echo "Done"
 date > /root/.lastupdate
 exit 0
