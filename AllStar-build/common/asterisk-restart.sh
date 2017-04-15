@@ -1,3 +1,3 @@
 #!/bin/bash
-sudo systemctl restart asterisk &>/dev/null
+(sudo systemctl restart dahdi;sudo systemctl restart asterisk) &
 exit 0
