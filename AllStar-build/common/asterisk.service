@@ -2,8 +2,9 @@
 Description=Asterisk PBX and telephony daemon
 Documentation=man:asterisk(8)
 Wants=network.target
-After=network-online.target
-
+After=network.target
+BindsTo=dev-dahdi-pseudo.device
+After=dev-dahdi-pseudo.device
 [Service]
 Type=simple
 StandardOutput=null
