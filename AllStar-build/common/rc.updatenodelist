@@ -3,7 +3,7 @@
 
 # Script Start
 TOPDOMAIN=allstarlink.org
-SUBDOMAINS="nodes4 nodes3 nodes2 nodes1"
+SUBDOMAINS="nodes1 nodes2 nodes3 nodes4"
 FILEPATH=/tmp
 WGET="$( which wget )"
 CP="$( which cp )"
