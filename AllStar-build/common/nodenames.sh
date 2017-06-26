@@ -6,7 +6,7 @@ disable()
     cd /var/lib/asterisk/sounds/rpt/nodenames
     rm -r * .* &>/dev/null
     touch /root/.nonames
-    echo"Nodenames disabled"
+    echo "Nodenames disabled"
 }
 enable()
 {
