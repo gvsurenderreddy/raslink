@@ -341,7 +341,7 @@ END_CONFIG
  *		(otherwise it will never be full).
  */
 
-#define FRAME_SIZE	160
+#define FRAME_SIZE	200
 #define	QUEUE_SIZE	6				
 
 #if defined(__FreeBSD__)
