@@ -24,6 +24,6 @@ sed -i 's/res \= sayphoneticstr/res \= saycharstr/' ./apps/app_rpt.c
 # Prevent reading false DTMF digits
 sed -i 's/26.0 : 42.0/32.0 : 42.0/' ./main/dsp.c
 # Increase queue size in usbradio driver
-sed -i 's/define	QUEUE_SIZE	2/define	QUEUE_SIZE	6/' ./channels/chan_usbradio.c
+sed -i 's/define	QUEUE_SIZE	2/define	QUEUE_SIZE	10/' ./channels/chan_usbradio.c
 echo "Done"
 exit 0
