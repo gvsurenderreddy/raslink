@@ -21,6 +21,8 @@ echo "Building dahdi..."
 patch -p1 < /usr/src/utils/AllStar-build/patches/patch-dahdi-dude-current
 # Remove setting the owner to asterisk
 patch -p0 < /usr/src/utils/AllStar-build/patches/patch-dahdi.rules
+# Add proper timer
+patch -p1 < /usr/src/utils/AllStar-build/patches/dahdi-dynamic-multispan-fifo.patch
 # Build and install dahdi
 (make all;make install;make config)
 if [ "$(grep -ic "dahdi" /etc/modules)" == "1" ]; then
