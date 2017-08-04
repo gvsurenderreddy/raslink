@@ -22,6 +22,8 @@ cd /usr/src/utils/astsrc/asterisk/
 # Put git commit number where asterisk makefile expects it
 git describe --always > .version
 # Configure the build process
+# Remove unneeded modules from previous build if they exist
+rm -f /usr/lib/asterisk/modules/chan_beagle.so /usr/lib/asterisk/modules/chan_tlb.so /usr/lib/asterisk/modules/chan_gtalk.so &>/dev/null
 distro=$(lsb_release -is)
 if [[ $distro = "Raspbian" ]]; then
   sed -i '/PROC\=/c\PROC\=arm' ./makeopts.in
