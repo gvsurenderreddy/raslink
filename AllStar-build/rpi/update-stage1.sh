@@ -25,7 +25,7 @@ sleep 1
 # Get new sources
 echo "Updating source files for All Star..."
 cd /usr/src/utils/
-git pull
+git pull &>/dev/null
 sleep 0.5
 echo "Done"
 # Update the system
