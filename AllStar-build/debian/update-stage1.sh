@@ -30,7 +30,7 @@ sleep 0.5
 echo "Done"
 # Update the system
 echo "Updating system software..."
-(apt-get -qq update;apt-get -qq dist-upgrade -y)
+(apt-get update;apt-get dist-upgrade -y)
 sleep 0.5
 echo "Done"
 # Clean the package database
