@@ -30,12 +30,12 @@ sleep 0.5
 echo "Done"
 # Update the system
 echo "Updating system software..."
-(apt-get update;apt-get dist-upgrade -y)
+(apt-get -qq update;apt-get dist-upgrade -y)
 sleep 0.5
 echo "Done"
 # Clean the package database
 echo "Cleaning up unneeded software..."
-(apt-get autoremove --purge -y;apt-get clean;apt-get autoclean)
+(apt-get -qq autoremove --purge -y;apt-get -qq clean;apt-get -qq autoclean)
 sleep 0.5
 echo "Done"
 # Setup for stage two
