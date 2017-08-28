@@ -18,7 +18,7 @@
 
 # Script Start
 # functions
-prompt(){
+prompt() {
 echo "${name} ${release} is abailable."
 read -e -p "do you wish to upgrade? [Y/N]" upgrade
 if [[ "$upgrade" = "y" ]] || [[ "$upgrade" = "Y" ]]; then
@@ -31,7 +31,7 @@ Run 'release-upgrade' when you are ready."
   exit 1
 fi
 }
-distro(){
+distro() {
 platform=$(lsb_release -is)
 if [[ $platform = "Raspbian" ]]; then
   name=RasLink
@@ -41,12 +41,12 @@ fi
 prev=jessie
 release=stretch
 }
-check(){
+check() {
 if [[ $(grep "${release}" /etc/apt/sources.list) != "0" ]]; then
   exit 0
 fi
 }
-update(){
+update() {
 sed -i "s/${prev}/${release}/" /etc/apt/sources.list /etc/apt/sources.list.d*.list
 (apt-get update;yes | apt-get dist-upgrade)
 cd /root
