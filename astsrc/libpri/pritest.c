@@ -28,7 +28,7 @@
  */
 
 /*
- * This program tests libpri call reception using a dahdi interface.
+ * This program tests libpri call reception using a zaptel interface.
  * Its state machines are setup for RECEIVING CALLS ONLY, so if you
  * are trying to both place and receive calls you have to a bit more.
  */
@@ -37,7 +37,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include <ctype.h>
 #include <sys/ioctl.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -46,8 +45,8 @@
 #include <sys/wait.h>
 #include <sys/resource.h>
 #include <sys/time.h>
-#include <dahdi/user.h>
-#include <dahdi/tonezone.h>
+#include <zaptel/zaptel.h>
+#include <zap.h>
 #include "libpri.h"
 
 #define PRI_DEF_NODETYPE	PRI_CPE
@@ -56,23 +55,13 @@
 #define MAX_CHAN		32
 #define	DCHANNEL_TIMESLOT	16
 
-#define READ_SIZE 160
 
 static int offset = 0;
 
-static void do_channel(int fd)
+static void do_channel(ZAP *z)
 {
 	/* This is the part that runs on a given channel */
-	char buf[READ_SIZE];
-	int res;
-	int i=0;
-
-	while ((res = read(fd, buf, READ_SIZE)) > 0 && (i++ < 1000)) {
-		if (write(fd, buf, res) == -1) {
-			fprintf(stderr, "--!! Failed write: %d\n", errno);
-			break;
-		}
-	}
+	zap_playf(z, "raw.ulaw", 0);
 }
 
 struct pri_chan {
@@ -152,57 +141,10 @@ static void hangup_channel(int channo)
 		chans[channo].needhangup = 0;
 }
 
-static int dahdi_open(char *fn)
-{
-	int fd;
-	int isnum;
-	int chan = 0;
-	int bs;
-	int x;
-
-	fprintf(stderr, "dahdi open %s\n", fn);
-
-	isnum = 1;
-	for (x = 0; x < strlen(fn); x++) {
-		if (!isdigit(fn[x])) {
-			isnum = 0;
-			break;
-		}
-	}
-	if (isnum) {
-		chan = atoi(fn);
-		if (chan < 1) {
-			printf("Invalid channel number '%s'\n", fn);
-			exit(1);
-		}
-		fn = "/dev/dahdi/channel";
-	}
-	fd = open(fn, O_RDWR /* | O_NONBLOCK */);
-	if (fd < 0) {
-		printf("Unable to open '%s': %s\n", fn, strerror(errno));
-		exit(1);
-	}
-	if (chan) {
-		if (ioctl(fd, DAHDI_SPECIFY, &chan)) {
-			x = errno;
-			close(fd);
-			errno = x;
-			printf("Unable to specify channel %d: %s\n", chan, strerror(errno));
-			exit(1);
-		}
-	}
-	bs = READ_SIZE;
-	if (ioctl(fd, DAHDI_SET_BLOCKSIZE, &bs) == -1) {
-		printf("Unable to set blocksize '%d': %s\n", bs,  strerror(errno));
-		exit(1);
-	}
-	return fd;
-}
-
 static void launch_channel(int channo)
 {
 	pid_t pid;
-	int z;
+	ZAP *z;
 	char ch[80];
 
 	/* Make sure hangup state is reset */
@@ -219,7 +161,7 @@ static void launch_channel(int channo)
 		chans[channo].pid = pid;
 	} else {
 		sprintf(ch, "%d", channo + offset);
-		z = dahdi_open(ch);
+		z = zap_open(ch, 0);
 		if (z) {
 			do_channel(z);
 			exit(0);
@@ -357,7 +299,7 @@ static int run_pri(int dfd, int swtype, int node)
 	fd_set rfds, efds;
 	int res,x;
 
-	pri = pri_new(dfd, node, swtype);
+	pri = pri_new_bri(dfd, 1, node, swtype);
 	if (!pri) {
 		fprintf(stderr, "Unable to create PRI\n");
 		return -1;
@@ -392,8 +334,8 @@ static int run_pri(int dfd, int swtype, int node)
 		} else if (res > 0) {
 			e = pri_check_event(pri);
 		} else if (errno == ELAST) {
-			res = ioctl(dfd, DAHDI_GETEVENT, &x);
-			printf("Got DAHDI event: %d\n", x);
+			res = ioctl(dfd, ZT_GETEVENT, &x);
+			printf("Got Zaptel event: %d\n", x);
 		} else if (errno != EINTR) 
 			fprintf(stderr, "Error (%d) on select: %s\n", ELAST, strerror(errno));
 
@@ -401,7 +343,7 @@ static int run_pri(int dfd, int swtype, int node)
 			handle_pri_event(pri, e);
 		}
 
-		res = ioctl(dfd, DAHDI_GETEVENT, &x);
+		res = ioctl(dfd, ZT_GETEVENT, &x);
 
 		if (!res && x) {
 			fprintf(stderr, "Got event on PRI interface: %d\n", x);
@@ -423,7 +365,7 @@ int main(int argc, char *argv[])
 	int dfd;
 	int swtype = PRI_DEF_SWITCHTYPE;
 	int node = PRI_DEF_NODETYPE;
-	struct dahdi_params p;
+	struct zt_params p;
 	if (argc < 2) {
 		fprintf(stderr, "Usage: pritest <dchannel> [swtypetype] [nodetype]\n");
 		exit(1);
@@ -433,11 +375,11 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Failed to open dchannel '%s': %s\n", argv[1], strerror(errno));
 		exit(1);
 	}
-	if (ioctl(dfd, DAHDI_GET_PARAMS, &p)) {
+	if (ioctl(dfd, ZT_GET_PARAMS, &p)) {
 		fprintf(stderr, "Unable to get parameters on '%s': %s\n", argv[1], strerror(errno));
 		exit(1);
 	}
-	if ((p.sigtype != DAHDI_SIG_HDLCRAW) && (p.sigtype != DAHDI_SIG_HDLCFCS)) {
+	if ((p.sigtype != ZT_SIG_HDLCRAW) && (p.sigtype != ZT_SIG_HDLCFCS)) {
 		fprintf(stderr, "%s is in %d signalling, not FCS HDLC or RAW HDLC mode\n", argv[1], p.sigtype);
 		exit(1);
 	}

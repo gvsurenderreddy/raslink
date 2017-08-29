@@ -48,10 +48,13 @@
 #include <sys/time.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <zaptel/zaptel.h>
+#ifndef SOLARIS
+#include <zap.h>
+#endif
 #include <pthread.h>
 #include <sys/select.h>
 #include "libpri.h"
-#include "pri_q921.h"
 #include "pri_q931.h"
 
 #ifndef AF_LOCAL
@@ -63,7 +66,7 @@
 #define PRI_DEF_NODETYPE	PRI_CPE
 #define PRI_DEF_SWITCHTYPE	PRI_SWITCH_NI2
 
-static struct pri *first;
+static struct pri *first, *cur;
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -156,9 +159,9 @@ static void testmsg(struct pri *pri, char *s)
 			*c = '\0';
 			c++;
 		}
-		if (keeplast || !pri)
+		if (keeplast)
 			printf("%s", s);
-		else if (pri == first)
+		else if (cur == first)
 			printf("-1 %s", s);
 		else
 			printf("-2 %s", s);
@@ -182,9 +185,9 @@ static void testerr(struct pri *pri, char *s)
 			*c = '\0';
 			c++;
 		}
-		if (keeplast || !pri)
+		if (keeplast)
 			printf("%s", s);
-		else if (pri == first)
+		else if (cur == first)
 			printf("=1 %s", s);
 		else
 			printf("=2 %s", s);
@@ -204,7 +207,7 @@ static void *dchan(void *data)
 	/* Joint D-channel */
 	struct pri *pri = data;
 	struct timeval *next, tv;
-	pri_event *e = NULL;
+	pri_event *e;
 	fd_set fds;
 	int res;
 	for(;;) {
@@ -225,6 +228,7 @@ static void *dchan(void *data)
 		FD_SET(pri_fd(pri), &fds);
 		res = select(pri_fd(pri) + 1, &fds, NULL, NULL, next ? &tv : NULL);
 		pthread_mutex_lock(&lock);
+		cur = pri;
 		if (res < 0) {
 			perror("select");
 		} else if (!res) {
@@ -234,9 +238,9 @@ static void *dchan(void *data)
 		}
 		if (e) {
 			if (first == pri) {
-				event1(pri, e);
+				event1(e->gen.pri, e);
 			} else {
-				event2(pri, e);
+				event2(e->gen.pri, e);
 			}
 		}
 		pthread_mutex_unlock(&lock);
