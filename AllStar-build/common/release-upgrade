@@ -65,9 +65,8 @@ sync
 sudo reboot
 }
 # Run the upgrade
-while [ 1 ]; do
 distro
 check
 prompt
 update
-done
+exit 0
