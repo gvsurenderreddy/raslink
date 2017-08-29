@@ -24,11 +24,7 @@ prompt() {
     if [[ "$upgrade" = "y" ]] || [[ "$upgrade" = "Y" ]]; then
       echo "Upgrading to ${name} ${release}
 This is going to take a while.
-During the upgrade, several questions will be asked.
-If you're not sure about a question, choose the default
-answer by pressing enter.
 Do *NOT* power off the system!"
-      sleep 3s
   else
       echo "Not upgrading to ${name} ${release}.
 Run 'release-upgrade' when you are ready."
