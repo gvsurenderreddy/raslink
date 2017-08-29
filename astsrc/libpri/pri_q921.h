@@ -57,6 +57,8 @@
 #define Q921_TEI_GR303_EOC_OPS			4
 #define Q921_TEI_GR303_TMC_SWITCHING	0
 #define Q921_TEI_GR303_TMC_CALLPROC		0
+#define Q921_TEI_AUTO_FIRST				64
+#define Q921_TEI_AUTO_LAST				126
 
 #define Q921_SAPI_CALL_CTRL		0
 #define Q921_SAPI_GR303_EOC		1
@@ -69,13 +71,16 @@
 #define Q921_SAPI_LAYER2_MANAGEMENT	63
 
 
-#define Q921_TEI_IDENTITY_REQUEST			1
-#define Q921_TEI_IDENTITY_ASSIGNED			2
-#define Q921_TEI_IDENTITY_DENIED			3
-#define Q921_TEI_IDENTITY_CHECK_REQUEST		4
-#define Q921_TEI_IDENTITY_CHECK_RESPONSE	5
-#define Q921_TEI_IDENTITY_REMOVE			6
-#define Q921_TEI_IDENTITY_VERIFY			7
+/*! Q.921 TEI management message type */
+enum q921_tei_identity {
+	Q921_TEI_IDENTITY_REQUEST = 1,
+	Q921_TEI_IDENTITY_ASSIGNED = 2,
+	Q921_TEI_IDENTITY_DENIED = 3,
+	Q921_TEI_IDENTITY_CHECK_REQUEST = 4,
+	Q921_TEI_IDENTITY_CHECK_RESPONSE = 5,
+	Q921_TEI_IDENTITY_REMOVE = 6,
+	Q921_TEI_IDENTITY_VERIFY = 7,
+};
 
 typedef struct q921_header {
 #if __BYTE_ORDER == __BIG_ENDIAN
@@ -158,38 +163,132 @@ typedef union {
 	struct q921_header h;
 } q921_h;
 
+enum q921_tx_frame_status {
+	Q921_TX_FRAME_NEVER_SENT,
+	Q921_TX_FRAME_PUSHED_BACK,
+	Q921_TX_FRAME_SENT,
+};
+
 typedef struct q921_frame {
-	struct q921_frame *next;	/* Next in list */
-	int len;					/* Length of header + body */
-	int transmitted;			/* Have we been transmitted */
-	q921_i h;
+	struct q921_frame *next;			/*!< Next in list */
+	int len;							/*!< Length of header + body */
+	enum q921_tx_frame_status status;	/*!< Tx frame status */
+	q921_i h;							/*!< Actual frame contents. */
 } q921_frame;
 
 #define Q921_INC(j) (j) = (((j) + 1) % 128)
+#define Q921_DEC(j) (j) = (((j) - 1) % 128)
 
 typedef enum q921_state {
-	Q921_DOWN = 0,
-	Q921_TEI_UNASSIGNED,
-	Q921_TEI_AWAITING_ESTABLISH,
-	Q921_TEI_AWAITING_ASSIGN,
-	Q921_TEI_ASSIGNED,
-	Q921_NEGOTIATION,
-	Q921_LINK_CONNECTION_RELEASED,	/* Also known as TEI_ASSIGNED */
-	Q921_LINK_CONNECTION_ESTABLISHED,
-	Q921_AWAITING_ESTABLISH,
-	Q921_AWAITING_RELEASE
+	/* All states except Q921_DOWN are defined in Q.921 SDL diagrams */
+	Q921_TEI_UNASSIGNED = 1,
+	Q921_ASSIGN_AWAITING_TEI = 2,
+	Q921_ESTABLISH_AWAITING_TEI = 3,
+	Q921_TEI_ASSIGNED = 4,
+	Q921_AWAITING_ESTABLISHMENT = 5,
+	Q921_AWAITING_RELEASE = 6,
+	Q921_MULTI_FRAME_ESTABLISHED = 7,
+	Q921_TIMER_RECOVERY = 8,
 } q921_state;
 
+/*! TEI identity check procedure states. */
+enum q921_tei_check_state {
+	/*! Not participating in the TEI check procedure. */
+	Q921_TEI_CHECK_NONE,
+	/*! No reply to TEI check received. */
+	Q921_TEI_CHECK_DEAD,
+	/*! Reply to TEI check received in current poll. */
+	Q921_TEI_CHECK_REPLY,
+	/*! No reply to current TEI check poll received.  A previous poll got a reply. */
+	Q921_TEI_CHECK_DEAD_REPLY,
+};
+
+/*! \brief Q.921 link controller structure */
+struct q921_link {
+	/*! Next Q.921 link in the chain. */
+	struct q921_link *next;
+	/*! D channel controller associated with this link. */
+	struct pri *ctrl;
+
+	/*!
+	 * \brief Q.931 Dummy call reference call associated with this TEI.
+	 *
+	 * \note If present then this call is allocated with the D
+	 * channel control structure or the link control structure
+	 * unless this is the TE PTMP broadcast TEI or a GR303 link.
+	 */
+	struct q931_call *dummy_call;
+
+	/*! Q.921 Re-transmission queue */
+	struct q921_frame *tx_queue;
+
+	/*! Q.921 State */
+	enum q921_state state;
+
+	/*! TEI identity check procedure state. */
+	enum q921_tei_check_state tei_check;
+
+	/*! Service Access Profile Identifier (SAPI) of this link */
+	int sapi;
+	/*! Terminal Endpoint Identifier (TEI) of this link */
+	int tei;
+	/*! TEI assignment random indicator. */
+	int ri;
+
+	/*! V(A) - Next I-frame sequence number needing ack */
+	int v_a;
+	/*! V(S) - Next I-frame sequence number to send */
+	int v_s;
+	/*! V(R) - Next I-frame sequence number expected to receive */
+	int v_r;
+
+	/* Various timers */
+
+	/*! T-200 retransmission timer */
+	int t200_timer;
+	/*! Retry Count (T200) */
+	int RC;
+	int t202_timer;
+	int n202_counter;
+	/*! Max idle time */
+	int t203_timer;
+	/*! Layer 2 persistence restart delay timer */
+	int restart_timer;
+
+	/* MDL variables */
+	int mdl_timer;
+	int mdl_error;
+	unsigned int mdl_free_me:1;
+
+	unsigned int peer_rx_busy:1;
+	unsigned int own_rx_busy:1;
+	unsigned int acknowledge_pending:1;
+	unsigned int reject_exception:1;
+	unsigned int l3_initiated:1;
+};
+
+static inline int Q921_ADD(int a, int b)
+{
+	return (a + b) % 128;
+}
+
 /* Dumps a *known good* Q.921 packet */
-extern void q921_dump(struct pri *pri, q921_h *h, int len, int showraw, int txrx);
+extern void q921_dump(struct pri *pri, q921_h *h, int len, int debugflags, int txrx);
 
 /* Bring up the D-channel */
-extern void q921_start(struct pri *pri, int now);
+void q921_start(struct q921_link *link);
+void q921_bring_layer2_up(struct pri *ctrl);
 
-extern void q921_reset(struct pri *pri);
+//extern void q921_reset(struct pri *pri, int reset_iqueue);
 
 extern pri_event *q921_receive(struct pri *pri, q921_h *h, int len);
 
-extern int q921_transmit_iframe(struct pri *pri, void *buf, int len, int cr);
+int q921_transmit_iframe(struct q921_link *link, void *buf, int len, int cr);
+
+int q921_transmit_uiframe(struct q921_link *link, void *buf, int len);
+
+extern pri_event *q921_dchannel_up(struct pri *pri);
+
+//extern pri_event *q921_dchannel_down(struct pri *pri);
 
 #endif
