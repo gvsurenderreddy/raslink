@@ -48,7 +48,7 @@ check() {
 }
 update() {
     sed -i "s/${prev}/${release}/" /etc/apt/sources.list /etc/apt/sources.list.d/*.list
-    (apt-get update;yes | apt-get dist-upgrade)
+    (apt-get update;yes yes | apt-get dist-upgrade)
     cd /root
     mv .bashrc .bashrc.orig
     cat .bashrc.orig > .bashrc
