@@ -52,7 +52,7 @@ check() {
 }
 update() {
     sed -i "s/${prev}/${release}/" /etc/apt/sources.list /etc/apt/sources.list.d/*.list
-    (apt-get update;yes yes | apt-get dist-upgrade;apt-get autoremove --purge -y;hash -r)
+    (apt-get update;yes yes | apt-get dist-upgrade;apt-get autoremove --purge -y)
     cd /root
     mv .bashrc .bashrc.orig
     cat .bashrc.orig > .bashrc
