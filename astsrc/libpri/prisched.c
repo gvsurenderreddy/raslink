@@ -28,30 +28,125 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "libpri.h"
 #include "pri_internal.h"
 
 
-static int maxsched = 0;
+/*! Initial number of scheduled timer slots. */
+#define SCHED_EVENTS_INITIAL	128
+/*!
+ * \brief Maximum number of scheduled timer slots.
+ * \note Should be a power of 2 and at least SCHED_EVENTS_INITIAL.
+ */
+#define SCHED_EVENTS_MAX		8192
+
+/*! \brief The maximum number of timers that were active at once. */
+static unsigned maxsched = 0;
+/*! Last pool id */
+static unsigned pool_id = 0;
 
 /* Scheduler routines */
-int pri_schedule_event(struct pri *pri, int ms, void (*function)(void *data), void *data)
+
+/*!
+ * \internal
+ * \brief Increase the number of scheduler timer slots available.
+ *
+ * \param ctrl D channel controller.
+ *
+ * \retval 0 on success.
+ * \retval -1 on error.
+ */
+static int pri_schedule_grow(struct pri *ctrl)
 {
-	int x;
-	struct timeval tv;
-	/* Scheduling runs on master channels only */
-	while (pri->master)
-		pri = pri->master;
-	for (x=1;x<MAX_SCHED;x++)
-		if (!pri->pri_sched[x].callback)
-			break;
-	if (x == MAX_SCHED) {
-		pri_error(pri, "No more room in scheduler\n");
+	unsigned num_slots;
+	struct pri_sched *timers;
+
+	/* Determine how many slots in the new timer table. */
+	if (ctrl->sched.num_slots) {
+		if (SCHED_EVENTS_MAX <= ctrl->sched.num_slots) {
+			/* Cannot grow the timer table any more. */
+			return -1;
+		}
+		num_slots = ctrl->sched.num_slots * 2;
+		if (SCHED_EVENTS_MAX < num_slots) {
+			num_slots = SCHED_EVENTS_MAX;
+		}
+	} else {
+		num_slots = SCHED_EVENTS_INITIAL;
+	}
+
+	/* Get and initialize the new timer table. */
+	timers = calloc(num_slots, sizeof(struct pri_sched));
+	if (!timers) {
+		/* Could not get a new timer table. */
 		return -1;
 	}
-	if (x > maxsched)
-		maxsched = x;
+	if (ctrl->sched.timer) {
+		/* Copy over the old timer table. */
+		memcpy(timers, ctrl->sched.timer,
+			ctrl->sched.num_slots * sizeof(struct pri_sched));
+		free(ctrl->sched.timer);
+	} else {
+		/* Creating the timer pool. */
+		pool_id += SCHED_EVENTS_MAX;
+		if (pool_id < SCHED_EVENTS_MAX
+			|| pool_id + (SCHED_EVENTS_MAX - 1) < SCHED_EVENTS_MAX) {
+			/*
+			 * Not likely to happen.
+			 *
+			 * Timer id's may be aliased if this D channel is used in an
+			 * NFAS group with redundant D channels.  Another D channel in
+			 * the group may have the same pool_id.
+			 */
+			pri_error(ctrl,
+				"Pool_id wrapped.  Please ignore if you are not using NFAS with backup D channels.\n");
+			pool_id = SCHED_EVENTS_MAX;
+		}
+		ctrl->sched.first_id = pool_id;
+	}
+
+	/* Put the new timer table in place. */
+	ctrl->sched.timer = timers;
+	ctrl->sched.num_slots = num_slots;
+	return 0;
+}
+
+/*!
+ * \brief Start a timer to schedule an event.
+ *
+ * \param ctrl D channel controller.
+ * \param ms Number of milliseconds to scheduled event.
+ * \param function Callback function to call when timeout.
+ * \param data Value to give callback function when timeout.
+ *
+ * \retval 0 if scheduler table is full and could not schedule the event.
+ * \retval id Scheduled event id.
+ */
+unsigned pri_schedule_event(struct pri *ctrl, int ms, void (*function)(void *data), void *data)
+{
+	unsigned max_used;
+	unsigned x;
+	struct timeval tv;
+
+	max_used = ctrl->sched.max_used;
+	for (x = 0; x < max_used; ++x) {
+		if (!ctrl->sched.timer[x].callback) {
+			break;
+		}
+	}
+	if (x == ctrl->sched.num_slots && pri_schedule_grow(ctrl)) {
+		pri_error(ctrl, "No more room in scheduler\n");
+		return 0;
+	}
+	if (ctrl->sched.max_used <= x) {
+		ctrl->sched.max_used = x + 1;
+	}
+	if (x >= maxsched) {
+		maxsched = x + 1;
+	}
 	gettimeofday(&tv, NULL);
 	tv.tv_sec += ms / 1000;
 	tv.tv_usec += (ms % 1000) * 1000;
@@ -59,71 +154,169 @@ int pri_schedule_event(struct pri *pri, int ms, void (*function)(void *data), vo
 		tv.tv_usec -= 1000000;
 		tv.tv_sec += 1;
 	}
-	pri->pri_sched[x].when = tv;
-	pri->pri_sched[x].callback = function;
-	pri->pri_sched[x].data = data;
-	return x;
+	ctrl->sched.timer[x].when = tv;
+	ctrl->sched.timer[x].callback = function;
+	ctrl->sched.timer[x].data = data;
+	return ctrl->sched.first_id + x;
 }
 
-struct timeval *pri_schedule_next(struct pri *pri)
+/*!
+ * \brief Determine the time of the next scheduled event to expire.
+ *
+ * \param ctrl D channel controller.
+ *
+ * \return Time of the next scheduled event to expire or NULL if no timers active.
+ */
+struct timeval *pri_schedule_next(struct pri *ctrl)
 {
 	struct timeval *closest = NULL;
-	int x;
-	/* Check subchannels */
-	if (pri->subchannel)
-		closest = pri_schedule_next(pri->subchannel);
-	for (x=1;x<MAX_SCHED;x++) {
-		if (pri->pri_sched[x].callback && 
-			(!closest || (closest->tv_sec > pri->pri_sched[x].when.tv_sec) ||
-				((closest->tv_sec == pri->pri_sched[x].when.tv_sec) && 
-				 (closest->tv_usec > pri->pri_sched[x].when.tv_usec))))
-				 	closest = &pri->pri_sched[x].when;
+	unsigned x;
+
+	/* Scan the scheduled timer slots backwards so we can update the max_used value. */
+	for (x = ctrl->sched.max_used; x--;) {
+		if (ctrl->sched.timer[x].callback) {
+			if (!closest) {
+				/* This is the highest sheduled timer slot in use. */
+				closest = &ctrl->sched.timer[x].when;
+				ctrl->sched.max_used = x + 1;
+			} else if ((closest->tv_sec > ctrl->sched.timer[x].when.tv_sec)
+				|| ((closest->tv_sec == ctrl->sched.timer[x].when.tv_sec)
+					&& (closest->tv_usec > ctrl->sched.timer[x].when.tv_usec))) {
+				closest = &ctrl->sched.timer[x].when;
+			}
+		}
+	}
+	if (!closest) {
+		/* No scheduled timer slots are active. */
+		ctrl->sched.max_used = 0;
 	}
 	return closest;
 }
 
-static pri_event *__pri_schedule_run(struct pri *pri, struct timeval *tv)
+/*!
+ * \internal
+ * \brief Run all expired timers or return an event generated by an expired timer.
+ *
+ * \param ctrl D channel controller.
+ * \param tv Current time.
+ *
+ * \return Event for upper layer to process or NULL if all expired timers run.
+ */
+static pri_event *__pri_schedule_run(struct pri *ctrl, struct timeval *tv)
 {
-	int x;
+	unsigned x;
+	unsigned max_used;
 	void (*callback)(void *);
 	void *data;
-	pri_event *e;
-	if (pri->subchannel) {
-		if ((e = __pri_schedule_run(pri->subchannel, tv))) {
-			return e;
+
+	max_used = ctrl->sched.max_used;
+	for (x = 0; x < max_used; ++x) {
+		if (ctrl->sched.timer[x].callback
+			&& ((ctrl->sched.timer[x].when.tv_sec < tv->tv_sec)
+			|| ((ctrl->sched.timer[x].when.tv_sec == tv->tv_sec)
+			&& (ctrl->sched.timer[x].when.tv_usec <= tv->tv_usec)))) {
+			/* This timer has expired. */
+			ctrl->schedev = 0;
+			callback = ctrl->sched.timer[x].callback;
+			data = ctrl->sched.timer[x].data;
+			ctrl->sched.timer[x].callback = NULL;
+			callback(data);
+			if (ctrl->schedev) {
+				return &ctrl->ev;
+			}
 		}
-	}
-	for (x=1;x<MAX_SCHED;x++) {
-		if (pri->pri_sched[x].callback &&
-			((pri->pri_sched[x].when.tv_sec < tv->tv_sec) ||
-			 ((pri->pri_sched[x].when.tv_sec == tv->tv_sec) &&
-			  (pri->pri_sched[x].when.tv_usec <= tv->tv_usec)))) {
-			        pri->schedev = 0;
-			  	callback = pri->pri_sched[x].callback;
-				data = pri->pri_sched[x].data;
-				pri->pri_sched[x].callback = NULL;
-				pri->pri_sched[x].data = NULL;
-				callback(data);
-            if (pri->schedev)
-                  return &pri->ev;
-	    }
 	}
 	return NULL;
 }
 
-pri_event *pri_schedule_run(struct pri *pri)
+/*!
+ * \brief Run all expired timers or return an event generated by an expired timer.
+ *
+ * \param ctrl D channel controller.
+ *
+ * \return Event for upper layer to process or NULL if all expired timers run.
+ */
+pri_event *pri_schedule_run(struct pri *ctrl)
 {
 	struct timeval tv;
+
 	gettimeofday(&tv, NULL);
-	return __pri_schedule_run(pri, &tv);
+	return __pri_schedule_run(ctrl, &tv);
 }
 
-
-void pri_schedule_del(struct pri *pri,int id)
+/*!
+ * \brief Delete a scheduled event.
+ *
+ * \param ctrl D channel controller.
+ * \param id Scheduled event id to delete.
+ * 0 is a disabled/unscheduled event id that is ignored.
+ *
+ * \return Nothing
+ */
+void pri_schedule_del(struct pri *ctrl, unsigned id)
 {
-	while (pri->master)
-		pri = pri->master;
-	if ((id >= MAX_SCHED) || (id < 0)) 
-		pri_error(pri, "Asked to delete sched id %d???\n", id);
-	pri->pri_sched[id].callback = NULL;
+	struct pri *nfas;
+
+	if (!id) {
+		/* Disabled/unscheduled event id. */
+		return;
+	}
+	if (ctrl->sched.first_id <= id
+		&& id <= ctrl->sched.first_id + (SCHED_EVENTS_MAX - 1)) {
+		ctrl->sched.timer[id - ctrl->sched.first_id].callback = NULL;
+		return;
+	}
+	if (ctrl->nfas) {
+		/* Try to find the timer on another D channel. */
+		for (nfas = PRI_NFAS_MASTER(ctrl); nfas; nfas = nfas->slave) {
+			if (nfas->sched.first_id <= id
+				&& id <= nfas->sched.first_id + (SCHED_EVENTS_MAX - 1)) {
+				nfas->sched.timer[id - nfas->sched.first_id].callback = NULL;
+				return;
+			}
+		}
+	}
+	pri_error(ctrl,
+		"Asked to delete sched id 0x%08x??? first_id=0x%08x, num_slots=0x%08x\n", id,
+		ctrl->sched.first_id, ctrl->sched.num_slots);
+}
+
+/*!
+ * \brief Is the scheduled event this callback.
+ *
+ * \param ctrl D channel controller.
+ * \param id Scheduled event id to check.
+ * 0 is a disabled/unscheduled event id.
+ * \param function Callback function to call when timeout.
+ * \param data Value to give callback function when timeout.
+ *
+ * \return TRUE if scheduled event has the callback.
+ */
+int pri_schedule_check(struct pri *ctrl, unsigned id, void (*function)(void *data), void *data)
+{
+	struct pri *nfas;
+
+	if (!id) {
+		/* Disabled/unscheduled event id. */
+		return 0;
+	}
+	if (ctrl->sched.first_id <= id
+		&& id <= ctrl->sched.first_id + (SCHED_EVENTS_MAX - 1)) {
+		return ctrl->sched.timer[id - ctrl->sched.first_id].callback == function
+			&& ctrl->sched.timer[id - ctrl->sched.first_id].data == data;
+	}
+	if (ctrl->nfas) {
+		/* Try to find the timer on another D channel. */
+		for (nfas = PRI_NFAS_MASTER(ctrl); nfas; nfas = nfas->slave) {
+			if (nfas->sched.first_id <= id
+				&& id <= nfas->sched.first_id + (SCHED_EVENTS_MAX - 1)) {
+				return nfas->sched.timer[id - nfas->sched.first_id].callback == function
+					&& nfas->sched.timer[id - nfas->sched.first_id].data == data;
+			}
+		}
+	}
+	pri_error(ctrl,
+		"Asked to check sched id 0x%08x??? first_id=0x%08x, num_slots=0x%08x\n", id,
+		ctrl->sched.first_id, ctrl->sched.num_slots);
+	return 0;
 }
