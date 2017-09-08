@@ -32,30 +32,16 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 90198 $")
-
-#include <sys/types.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <stdlib.h>
-#include <sys/time.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <errno.h>
-#include <string.h>
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 279472 $")
 
 #include <vorbis/codec.h>
 #include <vorbis/vorbisenc.h>
 
 #ifdef _WIN32
 #include <io.h>
-#include <fcntl.h>
 #endif
 
-#include "asterisk/lock.h"
-#include "asterisk/channel.h"
-#include "asterisk/file.h"
-#include "asterisk/logger.h"
+#include "asterisk/mod_format.h"
 #include "asterisk/module.h"
 
 /*
@@ -175,9 +161,9 @@ error:
 	}
 	
 	for (ptr = tmp->vc.user_comments; *ptr; ptr++)
-		ast_log(LOG_DEBUG, "OGG/Vorbis comment: %s\n", *ptr);
-	ast_log(LOG_DEBUG, "OGG/Vorbis bitstream is %d channel, %ldHz\n", tmp->vi.channels, tmp->vi.rate);
-	ast_log(LOG_DEBUG, "OGG/Vorbis file encoded by: %s\n", tmp->vc.vendor);
+		ast_debug(1, "OGG/Vorbis comment: %s\n", *ptr);
+		ast_debug(1, "OGG/Vorbis bitstream is %d channel, %ldHz\n", tmp->vi.channels, tmp->vi.rate);
+		ast_debug(1, "OGG/Vorbis file encoded by: %s\n", tmp->vc.vendor);
 
 	if (tmp->vi.channels != 1) {
 		ast_log(LOG_ERROR, "Only monophonic OGG/Vorbis files are currently supported!\n");
@@ -239,8 +225,12 @@ static int ogg_vorbis_rewrite(struct ast_filestream *s,
 	while (!tmp->eos) {
 		if (ogg_stream_flush(&tmp->os, &tmp->og) == 0)
 			break;
-		fwrite(tmp->og.header, 1, tmp->og.header_len, s->f);
-		fwrite(tmp->og.body, 1, tmp->og.body_len, s->f);
+		if (!fwrite(tmp->og.header, 1, tmp->og.header_len, s->f)) {
+			ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
+		}
+		if (!fwrite(tmp->og.body, 1, tmp->og.body_len, s->f)) {
+			ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
+		}
 		if (ogg_page_eos(&tmp->og))
 			tmp->eos = 1;
 	}
@@ -265,8 +255,12 @@ static void write_stream(struct vorbis_desc *s, FILE *f)
 				if (ogg_stream_pageout(&s->os, &s->og) == 0) {
 					break;
 				}
-				fwrite(s->og.header, 1, s->og.header_len, f);
-				fwrite(s->og.body, 1, s->og.body_len, f);
+				if (!fwrite(s->og.header, 1, s->og.header_len, f)) {
+				ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
+				}
+				if (!fwrite(s->og.body, 1, s->og.body_len, f)) {
+					ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
+				}
 				if (ogg_page_eos(&s->og)) {
 					s->eos = 1;
 				}
@@ -297,15 +291,15 @@ static int ogg_vorbis_write(struct ast_filestream *fs, struct ast_frame *f)
 		ast_log(LOG_WARNING, "Asked to write non-voice frame!\n");
 		return -1;
 	}
-	if (f->subclass != AST_FORMAT_SLINEAR) {
-		ast_log(LOG_WARNING, "Asked to write non-SLINEAR frame (%d)!\n",
-				f->subclass);
+	if (f->subclass.codec != AST_FORMAT_SLINEAR) {
+		ast_log(LOG_WARNING, "Asked to write non-SLINEAR frame (%s)!\n",
+			ast_getformatname(f->subclass.codec));
 		return -1;
 	}
 	if (!f->datalen)
 		return -1;
 
-	data = (short *) f->data;
+	data = (short *) f->data.ptr;
 
 	buffer = vorbis_analysis_buffer(&s->vd, f->samples);
 
@@ -444,10 +438,10 @@ static struct ast_frame *ogg_vorbis_read(struct ast_filestream *fs,
 	short *buf;	/* SLIN data buffer */
 
 	fs->fr.frametype = AST_FRAME_VOICE;
-	fs->fr.subclass = AST_FORMAT_SLINEAR;
+	fs->fr.subclass.codec = AST_FORMAT_SLINEAR;
 	fs->fr.mallocd = 0;
 	AST_FRAME_SET_BUFFER(&fs->fr, fs->buf, AST_FRIENDLY_OFFSET, BUF_SIZE);
-	buf = (short *)(fs->fr.data);	/* SLIN data buffer */
+	buf = (short *)(fs->fr.data.ptr);	/* SLIN data buffer */
 
 	while (samples_out != SAMPLES_MAX) {
 		float **pcm;
@@ -552,7 +546,9 @@ static const struct ast_format vorbis_f = {
 
 static int load_module(void)
 {
-	return ast_format_register(&vorbis_f);
+	if (ast_format_register(&vorbis_f))
+		return AST_MODULE_LOAD_FAILURE;
+	return AST_MODULE_LOAD_SUCCESS;
 }
 
 static int unload_module(void)
@@ -560,5 +556,8 @@ static int unload_module(void)
 	return ast_format_unregister(vorbis_f.name);
 }
 
-AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "OGG/Vorbis audio");
-
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, "OGG/Vorbis audio",
+	.load = load_module,
+	.unload = unload_module,
+	.load_pri = AST_MODPRI_APP_DEPEND
+);

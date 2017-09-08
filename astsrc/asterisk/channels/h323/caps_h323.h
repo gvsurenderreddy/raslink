@@ -26,17 +26,17 @@ class AST_G7231Capability : public H323AudioCapability
 	PCLASSINFO(AST_G7231Capability, H323AudioCapability);
 
 public:
-	AST_G7231Capability(int rx_frames = 7, BOOL annexA = TRUE);
+	AST_G7231Capability(int rx_frames = 7, PBoolean annexA = TRUE);
 	Comparison Compare(const PObject & obj) const;
 	virtual PObject * Clone() const;
 	virtual H323Codec * CreateCodec(H323Codec::Direction direction) const;
 	virtual unsigned GetSubType() const;
 	virtual PString GetFormatName() const;
-	virtual BOOL OnSendingPDU(H245_AudioCapability & pdu, unsigned packetSize) const;
-	virtual BOOL OnReceivedPDU(const H245_AudioCapability & pdu, unsigned & packetSize);
+	virtual PBoolean OnSendingPDU(H245_AudioCapability & pdu, unsigned packetSize) const;
+	virtual PBoolean OnReceivedPDU(const H245_AudioCapability & pdu, unsigned & packetSize);
 
 protected:
-	BOOL annexA;
+	PBoolean annexA;
 };
 
 /**This class describes the (fake) G729 codec capability.
@@ -114,11 +114,59 @@ public:
 	/* Get the name of the media data format this class represents. */
 	virtual PString GetFormatName() const;
 
-	BOOL OnSendingPDU(H245_AudioCapability & pdu, unsigned packetSize) const;
-	BOOL OnReceivedPDU(const H245_AudioCapability & pdu, unsigned & packetSize);
+	PBoolean OnSendingPDU(H245_AudioCapability & pdu, unsigned packetSize) const;
+	PBoolean OnReceivedPDU(const H245_AudioCapability & pdu, unsigned & packetSize);
 
 protected:
 	int comfortNoise;
 	int scrambled;
 };
+
+#define CISCO_G726r32 "G726r32"
+
+class AST_CiscoG726Capability : public H323NonStandardAudioCapability {
+	PCLASSINFO(AST_CiscoG726Capability, H323NonStandardAudioCapability);
+
+public:
+	/* Create a new Cisco G.726 capability */
+	AST_CiscoG726Capability(int rx_frames = 80);
+
+	/* Create a copy of the object. */
+	virtual PObject * Clone() const;
+
+	/* Create the codec instance, allocating resources as required. */
+	virtual H323Codec * CreateCodec(H323Codec::Direction direction) const;
+
+	/* Get the name of the media data format this class represents. */
+	virtual PString GetFormatName() const;
+};
+
+#define CISCO_DTMF_RELAY "UserInput/RtpDtmfRelay"
+
+class AST_CiscoDtmfCapability : public H323NonStandardDataCapability
+{
+	PCLASSINFO(AST_CiscoDtmfCapability, H323NonStandardDataCapability);
+
+public:
+	/* Create a new Cisco RTP DTMF Relay capability */
+	AST_CiscoDtmfCapability();
+
+	/* Create a copy of the object. */	
+	virtual PObject *Clone() const;
+
+	/* Create the codec instance, allocating resources as required. */
+	virtual H323Codec * CreateCodec(H323Codec::Direction direction) const;
+
+	/* Get the name of the media data format this class represents. */
+	virtual PString GetFormatName() const;
+	
+	virtual H323Channel *CreateChannel(H323Connection &,
+										H323Channel::Directions,
+										unsigned,
+										const H245_H2250LogicalChannelParameters *) const
+	{
+		return NULL;
+	}
+};
+
 #endif /* __AST_H323CAPS_H */

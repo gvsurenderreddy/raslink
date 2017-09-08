@@ -23,10 +23,14 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * Version Info: $Id: chan_h323.h 44684 2006-10-07 14:39:34Z pcadach $
+ * Version Info: $Id: chan_h323.h 227580 2009-11-04 14:05:12Z tilghman $
  */
 
+#ifndef CHAN_H323_H
+#define CHAN_H323_H
+
 #include <arpa/inet.h>
+#include "asterisk/frame_defs.h"
 
 /*
  * Enable support for sending/reception of tunnelled Q.SIG messages and
@@ -38,6 +42,10 @@
 
 #define H323_TUNNEL_CISCO	(1 << 0)
 #define H323_TUNNEL_QSIG	(1 << 1)
+
+#define H323_HOLD_NOTIFY	(1 << 0)
+#define H323_HOLD_Q931ONLY	(1 << 1)
+#define H323_HOLD_H450		(1 << 2)
 
 /** call_option struct holds various bits
  *         of information for each call */
@@ -55,12 +63,14 @@ typedef struct call_options {
 	int				progress_setup;
 	int				progress_alert;
 	int				progress_audio;
-	int				dtmfcodec;
+	int				dtmfcodec[2];
 	int				dtmfmode;
-	int				capability;
+	format_t        capability;
 	int				bridge;
 	int				nat;
 	int				tunnelOptions;
+	int				holdHandling;
+	int				autoframing; /*!< turn on to override local settings with remote framing length */
 	struct ast_codec_pref	prefs;
 } call_options_t;
 
@@ -176,7 +186,7 @@ extern answer_call_cb on_answer_call;
 /* This is a callback prototype function, called when
    we know which RTP payload type RFC2833 will be
    transmitted */
-typedef void (*rfc2833_cb)(unsigned, const char *, int);
+typedef void (*rfc2833_cb)(unsigned, const char *, int, int);
 extern rfc2833_cb on_set_rfc2833_payload;
 
 typedef void (*hangup_cb)(unsigned, const char *, int);
@@ -188,15 +198,19 @@ extern setcapabilities_cb on_setcapabilities;
 typedef void (*setpeercapabilities_cb)(unsigned, const char *, int, struct ast_codec_pref *);
 extern setpeercapabilities_cb on_setpeercapabilities;
 
+typedef void (*onhold_cb)(unsigned, const char *, int);
+extern onhold_cb on_hold;
+
 /* debug flag */
 extern int h323debug;
 
 #define H323_DTMF_RFC2833	(1 << 0)
-#define H323_DTMF_INBAND	(1 << 1)
+#define H323_DTMF_CISCO		(1 << 1)
+#define H323_DTMF_SIGNAL	(1 << 2)
+#define H323_DTMF_INBAND	(1 << 3)
 
-#ifndef BOOL
-#define BOOL int
-#endif
+#define H323_DTMF_RFC2833_PT	101
+#define H323_DTMF_CISCO_PT		121
 
 #ifdef __cplusplus
 extern "C" {
@@ -223,12 +237,14 @@ extern "C" {
 					rfc2833_cb,
 					hangup_cb,
 					setcapabilities_cb,
-					setpeercapabilities_cb);
+					setpeercapabilities_cb,
+					onhold_cb);
 	int h323_set_capabilities(const char *, int, int, struct ast_codec_pref *, int);
 	int h323_set_alias(struct oh323_alias *);
 	int h323_set_gk(int, char *, char *);
 	void h323_set_id(char *);
 	void h323_show_tokens(void);
+	void h323_show_version(void);
 
 	/* H323 listener related funcions */
 	int h323_start_listener(int, struct sockaddr_in);
@@ -248,7 +264,10 @@ extern "C" {
 	int h323_answering_call(const char *token, int);
 	int h323_soft_hangup(const char *data);
 	int h323_show_codec(int fd, int argc, char *argv[]);
+	int h323_hold_call(const char *token, int);
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif

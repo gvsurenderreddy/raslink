@@ -260,7 +260,7 @@ int run_menu(void)
 		GtkTreeIter iter, iter2;
 		gtk_tree_store_append(store, &iter, NULL);
 		gtk_tree_store_set(store, &iter,
-			COLUMN_NAME, cat->name,
+			COLUMN_NAME, cat->displayname,
 			COLUMN_SELECTED, TRUE,
 			-1);
 		AST_LIST_TRAVERSE(&cat->members, mem, list) {
@@ -273,18 +273,18 @@ int run_menu(void)
 			struct conflict *cnf;
 
 			AST_LIST_TRAVERSE(&mem->deps, dep, list) {
-				strncat(dep_buf, dep->name, sizeof(dep_buf) - strlen(dep_buf) - 1);
+				strncat(dep_buf, dep->displayname, sizeof(dep_buf) - strlen(dep_buf) - 1);
 				strncat(dep_buf, dep->member ? "(M)" : "(E)", sizeof(dep_buf) - strlen(dep_buf) - 1);
 				if (AST_LIST_NEXT(dep, list))
 					strncat(dep_buf, ", ", sizeof(dep_buf) - strlen(dep_buf) - 1);
 			}
 			AST_LIST_TRAVERSE(&mem->uses, use, list) {
-				strncat(use_buf, use->name, sizeof(use_buf) - strlen(use_buf) - 1);
+				strncat(use_buf, use->displayname, sizeof(use_buf) - strlen(use_buf) - 1);
 				if (AST_LIST_NEXT(use, list))
 					strncat(use_buf, ", ", sizeof(use_buf) - strlen(use_buf) - 1);
 			}
 			AST_LIST_TRAVERSE(&mem->conflicts, cnf, list) {
-				strncat(cnf_buf, cnf->name, sizeof(cnf_buf) - strlen(cnf_buf) - 1);
+				strncat(cnf_buf, cnf->displayname, sizeof(cnf_buf) - strlen(cnf_buf) - 1);
 				strncat(cnf_buf, cnf->member ? "(M)" : "(E)", sizeof(cnf_buf) - strlen(cnf_buf) - 1);
 				if (AST_LIST_NEXT(cnf, list))
 					strncat(cnf_buf, ", ", sizeof(cnf_buf) - strlen(cnf_buf) - 1);

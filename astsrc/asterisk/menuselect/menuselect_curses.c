@@ -40,7 +40,7 @@
 #define TITLE_HEIGHT	7
 
 #define MIN_X		80
-#define MIN_Y		21
+#define MIN_Y		27
 
 #define PAGE_OFFSET	10
 
@@ -49,8 +49,8 @@
 
 #define SCROLL_DOWN_INDICATOR "... More ..."
 
-#define MIN(x,y) ((x)<(y)?(x):(y))
-#define MAX(x,y) ((x)<(y)?(y):(x))
+#define MIN(a, b) ({ typeof(a) __a = (a); typeof(b) __b = (b); ((__a > __b) ? __b : __a);})
+#define MAX(a, b) ({ typeof(a) __a = (a); typeof(b) __b = (b); ((__a < __b) ? __b : __a);})
 
 extern int changes_made;
 
@@ -82,7 +82,7 @@ static const char * const help_info[] = {
 };
 
 /*! \brief Handle a window resize in xterm */
-static void winch_handler(int sig)
+static void _winch_handler(int sig)
 {
 	getmaxyx(stdscr, max_y, max_x);
 
@@ -93,11 +93,19 @@ static void winch_handler(int sig)
 	}
 }
 
+static struct sigaction winch_handler = {
+	.sa_handler = _winch_handler,
+};
+
 /*! \brief Handle a SIGQUIT */
-static void sigint_handler(int sig)
+static void _sigint_handler(int sig)
 {
 
 }
+
+static struct sigaction sigint_handler = {
+	.sa_handler = _sigint_handler,
+};
 
 /*! \brief Display help information */
 static void show_help(WINDOW *win)
@@ -107,7 +115,7 @@ static void show_help(WINDOW *win)
 	wclear(win);
 	for (i = 0; i < (sizeof(help_info) / sizeof(help_info[0])); i++) {
 		wmove(win, i, max_x / 2 - 15);
-		waddstr(win, help_info[i]);
+		waddstr(win, (char *) help_info[i]);
 	}
 	wrefresh(win);
 	getch(); /* display the help until the user hits a key */
@@ -160,10 +168,7 @@ static void draw_main_menu(WINDOW *menu, int curopt)
 
 	AST_LIST_TRAVERSE(&categories, cat, list) {
 		wmove(menu, i++, max_x / 2 - 10);
-		if (!strlen_zero(cat->displayname))
-			snprintf(buf, sizeof(buf), "%d.%s %s", i, i < 10 ? " " : "", cat->displayname);
-		else
-			snprintf(buf, sizeof(buf), "%d.%s %s", i, i < 10 ? " " : "", cat->name);
+		snprintf(buf, sizeof(buf), " %s", strlen_zero(cat->displayname) ? cat->name : cat->displayname);
 		waddstr(menu, buf);
 	}
 
@@ -192,13 +197,13 @@ static void display_mem_info(WINDOW *menu, struct member *mem, int start, int en
 
 	if (mem->displayname) {
 		wmove(menu, end - start + 2, max_x / 2 - 16);
-		waddstr(menu, mem->displayname);
+		waddstr(menu, (char *) mem->displayname);
 	}
 	if (!AST_LIST_EMPTY(&mem->deps)) {
 		wmove(menu, end - start + 3, max_x / 2 - 16);
 		strcpy(buf, "Depends on: ");
 		AST_LIST_TRAVERSE(&mem->deps, dep, list) {
-			strncat(buf, dep->name, sizeof(buf) - strlen(buf) - 1);
+			strncat(buf, dep->displayname, sizeof(buf) - strlen(buf) - 1);
 			strncat(buf, dep->member ? "(M)" : "(E)", sizeof(buf) - strlen(buf) - 1);
 			if (AST_LIST_NEXT(dep, list))
 				strncat(buf, ", ", sizeof(buf) - strlen(buf) - 1);
@@ -209,7 +214,7 @@ static void display_mem_info(WINDOW *menu, struct member *mem, int start, int en
 		wmove(menu, end - start + 4, max_x / 2 - 16);
 		strcpy(buf, "Can use: ");
 		AST_LIST_TRAVERSE(&mem->uses, use, list) {
-			strncat(buf, use->name, sizeof(buf) - strlen(buf) - 1);
+			strncat(buf, use->displayname, sizeof(buf) - strlen(buf) - 1);
 			strncat(buf, use->member ? "(M)" : "(E)", sizeof(buf) - strlen(buf) - 1);
 			if (AST_LIST_NEXT(use, list))
 				strncat(buf, ", ", sizeof(buf) - strlen(buf) - 1);
@@ -220,7 +225,7 @@ static void display_mem_info(WINDOW *menu, struct member *mem, int start, int en
 		wmove(menu, end - start + 5, max_x / 2 - 16);
 		strcpy(buf, "Conflicts with: ");
 		AST_LIST_TRAVERSE(&mem->conflicts, con, list) {
-			strncat(buf, con->name, sizeof(buf) - strlen(buf) - 1);
+			strncat(buf, con->displayname, sizeof(buf) - strlen(buf) - 1);
 			strncat(buf, con->member ? "(M)" : "(E)", sizeof(buf) - strlen(buf) - 1);
 			if (AST_LIST_NEXT(con, list))
 				strncat(buf, ", ", sizeof(buf) - strlen(buf) - 1);
@@ -263,13 +268,13 @@ static void draw_category_menu(WINDOW *menu, struct category *cat, int start, in
 		wmove(menu, j++, max_x / 2 - 10);
 		i++;
 		if ((mem->depsfailed == HARD_FAILURE) || (mem->conflictsfailed == HARD_FAILURE)) {
-			snprintf(buf, sizeof(buf), "XXX %d.%s %s", i, i < 10 ? " " : "", mem->name);
+			snprintf(buf, sizeof(buf), "XXX %s", mem->name);
 		} else if (mem->depsfailed == SOFT_FAILURE) {
-			snprintf(buf, sizeof(buf), "<%s> %d.%s %s", mem->enabled ? "*" : " ", i, i < 10 ? " " : "", mem->name);
+			snprintf(buf, sizeof(buf), "<%s> %s", mem->enabled ? "*" : " ", mem->name);
 		} else if (mem->conflictsfailed == SOFT_FAILURE) {
-			snprintf(buf, sizeof(buf), "(%s) %d.%s %s", mem->enabled ? "*" : " ", i, i < 10 ? " " : "", mem->name);
+			snprintf(buf, sizeof(buf), "(%s) %s", mem->enabled ? "*" : " ", mem->name);
 		} else {
-			snprintf(buf, sizeof(buf), "[%s] %d.%s %s", mem->enabled ? "*" : " ", i, i < 10 ? " " : "", mem->name);
+			snprintf(buf, sizeof(buf), "[%s] %s", mem->enabled ? "*" : " ", mem->name);
 		}
 		waddstr(menu, buf);
 		
@@ -356,10 +361,22 @@ static int run_category_menu(WINDOW *menu, int cat_num)
 			changed = move_down(&curopt, maxopt, 1, &start, &end, scroll);
 			break;
 		case KEY_PPAGE:
-			changed = move_up(&curopt, maxopt, MIN(PAGE_OFFSET, max_y - TITLE_HEIGHT - 6 - (scroll & SCROLL_DOWN ? 1 : 0)), &start, &end, scroll);
+			changed = move_up(
+				&curopt,
+				maxopt,
+				MIN(PAGE_OFFSET, max_y - TITLE_HEIGHT - 6 - (scroll & SCROLL_DOWN ? 1 : 0)),
+				&start,
+				&end,
+				scroll);
 			break;
 		case KEY_NPAGE:
-			changed = move_down(&curopt, maxopt, MIN(PAGE_OFFSET, max_y - TITLE_HEIGHT - 6 - (scroll & SCROLL_DOWN ? 1 : 0)), &start, &end, scroll);
+			changed = move_down(
+				&curopt,
+				maxopt,
+				MIN(PAGE_OFFSET, max_y - TITLE_HEIGHT - 6 - (scroll & SCROLL_DOWN ? 1 : 0)),
+				&start,
+				&end,
+				scroll);
 			break;
 		case KEY_HOME:
 			changed = move_up(&curopt, maxopt, curopt, &start, &end, scroll);
@@ -429,7 +446,7 @@ static void draw_title_window(WINDOW *title)
 	wmove(title, 1, (max_x / 2) - (strlen(titlebar) / 2));
 	waddstr(title, titlebar);
 	wmove(title, 2, (max_x / 2) - (strlen(menu_name) / 2));
-	waddstr(title, menu_name);
+	waddstr(title, (char *) menu_name);
 	wmove(title, 3, (max_x / 2) - (strlen(titlebar) / 2));
 	waddstr(title, titlebar);
 	wmove(title, 5, (max_x / 2) - (strlen(MENU_HELP) / 2));
@@ -450,8 +467,8 @@ int run_menu(void)
 
 	initscr();
 	getmaxyx(stdscr, max_y, max_x);
-	signal(SIGWINCH, winch_handler); /* handle window resizing in xterm */
-	signal(SIGINT, sigint_handler); /* handle window resizing in xterm */
+	sigaction(SIGWINCH, &winch_handler, NULL); /* handle window resizing in xterm */
+	sigaction(SIGINT, &sigint_handler, NULL); /* handle window resizing in xterm */
 
 	if (max_x < MIN_X || max_y < MIN_Y) {
 		fprintf(stderr, "Terminal must be at least %d x %d.\n", MIN_X, MIN_Y);
@@ -539,6 +556,8 @@ struct blip {
 	enum blip_type type;
 	int x;
 	int y;
+	int ox;
+	int oy;
 	int goingleft;
 	AST_LIST_ENTRY(blip) entry;
 };
@@ -608,14 +627,18 @@ static int repaint_screen(void)
 {
 	struct blip *cur;
 
-	clear();
-
 	wmove(stdscr, 0, 0);
 	wprintw(stdscr, "Score: %d", score);
 
 	AST_LIST_TRAVERSE(&blips, cur, entry) {
-		wmove(stdscr, cur->y, cur->x);
-		waddch(stdscr, type2chtype(cur->type));	
+		if (cur->x != cur->ox || cur->y != cur->oy) {
+			wmove(stdscr, cur->oy, cur->ox);
+			waddch(stdscr, ' ');
+			wmove(stdscr, cur->y, cur->x);
+			waddch(stdscr, type2chtype(cur->type));	
+			cur->ox = cur->x;
+			cur->oy = cur->y;
+		}
 	}
 
 	wmove(stdscr, 0, max_x - 1);
@@ -746,6 +769,9 @@ static int remove_blip(struct blip *blip)
 
 	if (blip->type == BLIP_ALIEN)
 		num_aliens--;
+
+	wmove(stdscr, blip->oy, blip->ox);
+	waddch(stdscr, ' ');
 
 	free(blip);
 
