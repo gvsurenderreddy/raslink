@@ -26,35 +26,19 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 227580 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 114611 $")
+
+#include <string.h>
 
 #include "asterisk/frame.h"
 #include "asterisk/slinfactory.h"
+#include "asterisk/logger.h"
 #include "asterisk/translate.h"
 
 void ast_slinfactory_init(struct ast_slinfactory *sf) 
 {
 	memset(sf, 0, sizeof(*sf));
 	sf->offset = sf->hold;
-	sf->output_format = AST_FORMAT_SLINEAR;
-}
-
-int ast_slinfactory_init_rate(struct ast_slinfactory *sf, unsigned int sample_rate) 
-{
-	memset(sf, 0, sizeof(*sf));
-	sf->offset = sf->hold;
-	switch (sample_rate) {
-	case 8000:
-		sf->output_format = AST_FORMAT_SLINEAR;
-		break;
-	case 16000:
-		sf->output_format = AST_FORMAT_SLINEAR16;
-		break;
-	default:
-		return -1;
-	}
-
-	return 0;
 }
 
 void ast_slinfactory_destroy(struct ast_slinfactory *sf) 
@@ -73,64 +57,44 @@ void ast_slinfactory_destroy(struct ast_slinfactory *sf)
 int ast_slinfactory_feed(struct ast_slinfactory *sf, struct ast_frame *f)
 {
 	struct ast_frame *begin_frame = f, *duped_frame = NULL, *frame_ptr;
-	unsigned int x = 0;
+	unsigned int x;
 
-	/* In some cases, we can be passed a frame which has no data in it, but
-	 * which has a positive number of samples defined. Once such situation is
-	 * when a jitter buffer is in use and the jitter buffer interpolates a frame.
-	 * The frame it produces has data set to NULL, datalen set to 0, and samples
-	 * set to either 160 or 240.
-	 */
-	if (!f->data.ptr) {
-		return 0;
-	}
-
-	if (f->subclass.codec != sf->output_format) {
-		if (sf->trans && f->subclass.codec != sf->format) {
+	if (f->subclass != AST_FORMAT_SLINEAR) {
+		if (sf->trans && f->subclass != sf->format) {
 			ast_translator_free_path(sf->trans);
 			sf->trans = NULL;
 		}
 
 		if (!sf->trans) {
-			if (!(sf->trans = ast_translator_build_path(sf->output_format, f->subclass.codec))) {
-				ast_log(LOG_WARNING, "Cannot build a path from %s to %s\n", ast_getformatname(f->subclass.codec),
-					ast_getformatname(sf->output_format));
+			if ((sf->trans = ast_translator_build_path(AST_FORMAT_SLINEAR, f->subclass)) == NULL) {
+				ast_log(LOG_WARNING, "Cannot build a path from %s to slin\n", ast_getformatname(f->subclass));
 				return 0;
+			} else {
+				sf->format = f->subclass;
 			}
-			sf->format = f->subclass.codec;
 		}
 
-		if (!(begin_frame = ast_translate(sf->trans, f, 0))) {
+		if (!(begin_frame = ast_translate(sf->trans, f, 0))) 
 			return 0;
-		}
 		
-		if (!(duped_frame = ast_frisolate(begin_frame))) {
-			return 0;
-		}
+		duped_frame = ast_frdup(begin_frame);
 
-		if (duped_frame != begin_frame) {
-			ast_frfree(begin_frame);
-		}
+		ast_frfree(begin_frame);
+
+		if (!duped_frame)
+			return 0;
 	} else {
-		if (sf->trans) {
-			ast_translator_free_path(sf->trans);
-			sf->trans = NULL;
-		}
 		if (!(duped_frame = ast_frdup(f)))
 			return 0;
 	}
 
-	AST_LIST_TRAVERSE(&sf->queue, frame_ptr, frame_list) {
+	x = 0;
+	AST_LIST_TRAVERSE(&sf->queue, frame_ptr, frame_list)
 		x++;
-	}
 
-	/* if the frame was translated, the translator may have returned multiple
-	   frames, so process each of them
-	*/
-	for (begin_frame = duped_frame; begin_frame; begin_frame = AST_LIST_NEXT(begin_frame, frame_list)) {
-		AST_LIST_INSERT_TAIL(&sf->queue, begin_frame, frame_list);
-		sf->size += begin_frame->samples;
-	}
+	AST_LIST_INSERT_TAIL(&sf->queue, duped_frame, frame_list);
+
+	sf->size += duped_frame->samples;
 
 	return x;
 }
@@ -162,7 +126,7 @@ int ast_slinfactory_read(struct ast_slinfactory *sf, short *buf, size_t samples)
 		}
 		
 		if ((frame_ptr = AST_LIST_REMOVE_HEAD(&sf->queue, frame_list))) {
-			frame_data = frame_ptr->data.ptr;
+			frame_data = frame_ptr->data;
 			
 			if (frame_ptr->samples <= ineed) {
 				memcpy(offset, frame_data, frame_ptr->samples * sizeof(*offset));

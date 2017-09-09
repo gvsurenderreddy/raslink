@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 268894 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 122002 $")
 
 #include "asterisk/global_datastores.h"
 #include "asterisk/linkedlists.h"
@@ -79,34 +79,35 @@ static void *dialed_interface_duplicate(void *data)
 	return new_list;
 }
 
+
+static void *dial_features_duplicate(void *data)
+{
+	struct ast_dial_features *df = data, *df_copy;
+
+	if (!(df_copy = ast_calloc(1, sizeof(*df)))) {
+		return NULL;
+	}
+
+	memcpy(df_copy, df, sizeof(*df));
+
+	return df_copy;
+}
+
+static void dial_features_destroy(void *data) {
+	struct ast_dial_features *df = data;
+	if (df) {
+		ast_free(df);
+	}
+}
+
 const struct ast_datastore_info dialed_interface_info = {
 	.type = "dialed-interface",
 	.destroy = dialed_interface_destroy,
 	.duplicate = dialed_interface_duplicate,
 };
 
-static void secure_call_store_destroy(void *data)
-{
-	struct ast_secure_call_store *store = data;
-
-	ast_free(store);
-}
-
-static void *secure_call_store_duplicate(void *data)
-{
-	struct ast_secure_call_store *old = data;
-	struct ast_secure_call_store *new;
-
-	if (!(new = ast_calloc(1, sizeof(*new)))) {
-		return NULL;
-	}
-	new->signaling = old->signaling;
-	new->media = old->media;
-
-	return new;
-}
-const struct ast_datastore_info secure_call_info = {
-	.type = "encrypt-call",
-	.destroy = secure_call_store_destroy,
-	.duplicate = secure_call_store_duplicate,
+const struct ast_datastore_info dial_features_info = {
+	.type = "dial-features",
+	.destroy = dial_features_destroy,
+	.duplicate = dial_features_duplicate,
 };

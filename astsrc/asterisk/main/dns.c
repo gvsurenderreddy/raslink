@@ -31,29 +31,21 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 205214 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 114611 $")
 
-#include "asterisk/network.h"
-#include <arpa/nameser.h>	/* res_* functions */
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/nameser.h>
 #include <resolv.h>
+#include <unistd.h>
 
+#include "asterisk/logger.h"
 #include "asterisk/channel.h"
 #include "asterisk/dns.h"
 #include "asterisk/endian.h"
 
 #define MAX_SIZE 4096
-
-#ifdef __PDP_ENDIAN
-#if __BYTE_ORDER == __PDP_ENDIAN
-#define DETERMINED_BYTE_ORDER __LITTLE_ENDIAN
-#endif
-#endif
-#if __BYTE_ORDER == __BIG_ENDIAN
-#define DETERMINED_BYTE_ORDER __BIG_ENDIAN
-#endif
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-#define DETERMINED_BYTE_ORDER __LITTLE_ENDIAN
-#endif
 
 /* The dns_HEADER structure definition below originated
    in the arpa/nameser.h header file distributed with ISC
@@ -116,7 +108,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 205214 $")
 
 typedef struct {
 	unsigned	id:16;          /*!< query identification number */
-#if DETERMINED_BYTE_ORDER == __BIG_ENDIAN
+#if __BYTE_ORDER == __BIG_ENDIAN
 			/* fields in third byte */
 	unsigned	qr:1;           /*!< response flag */
 	unsigned	opcode:4;       /*!< purpose of message */
@@ -130,7 +122,7 @@ typedef struct {
 	unsigned	cd:1;           /*!< checking disabled by resolver */
 	unsigned	rcode:4;        /*!< response code */
 #endif
-#if DETERMINED_BYTE_ORDER == __LITTLE_ENDIAN
+#if __BYTE_ORDER == __LITTLE_ENDIAN || __BYTE_ORDER == __PDP_ENDIAN
 			/* fields in third byte */
 	unsigned	rd:1;           /*!< recursion desired */
 	unsigned	tc:1;           /*!< truncated message */
@@ -156,7 +148,7 @@ struct dn_answer {
 	unsigned short class;
 	unsigned int ttl;
 	unsigned short size;
-} __attribute__((__packed__));
+} __attribute__ ((__packed__));
 
 static int skip_name(unsigned char *s, int len)
 {
@@ -189,7 +181,6 @@ static int dns_parse_answer(void *context,
 	unsigned char *fullanswer = answer;
 	struct dn_answer *ans;
 	dns_HEADER *h;
-	int ret = 0;
 	int res;
 	int x;
 
@@ -235,13 +226,14 @@ static int dns_parse_answer(void *context,
 					ast_log(LOG_WARNING, "Failed to parse result\n");
 					return -1;
 				}
-				ret = 1;
+				if (res > 0)
+					return 1;
 			}
 		}
 		answer += ntohs(ans->size);
 		len -= ntohs(ans->size);
 	}
-	return ret;
+	return 0;
 }
 
 #ifndef HAVE_RES_NINIT
@@ -275,10 +267,12 @@ int ast_search_dns(void *context,
 		if ((res = dns_parse_answer(context, class, type, answer, res, callback)) < 0) {
 			ast_log(LOG_WARNING, "DNS Parse error for %s\n", dname);
 			ret = -1;
-		} else if (res == 0) {
-			ast_debug(1, "No matches found in DNS for %s\n", dname);
+		}
+		else if (res == 0) {
+			ast_log(LOG_DEBUG, "No matches found in DNS for %s\n", dname);
 			ret = 0;
-		} else
+		}
+		else
 			ret = 1;
 	}
 #ifdef HAVE_RES_NINIT
@@ -288,7 +282,7 @@ int ast_search_dns(void *context,
 	res_nclose(&dnsstate);
 #endif
 #else
-#ifdef HAVE_RES_CLOSE
+#ifndef __APPLE__
 	res_close();
 #endif
 	ast_mutex_unlock(&res_lock);

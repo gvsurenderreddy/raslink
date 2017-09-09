@@ -26,25 +26,24 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. 
  *
- * Version Info: $Id: compat_h323.cxx 182722 2009-03-17 20:47:31Z jpeeler $
+ * Version Info: $Id: compat_h323.cxx 43345 2006-09-20 17:45:25Z pcadach $
  */
 #include <ptlib.h>
 #include <h323.h>
 #include <transports.h>
 
 #include "ast_h323.h"
-#include "compat_h323.h"
 
 #if VERSION(OPENH323_MAJOR,OPENH323_MINOR,OPENH323_BUILD) < VERSION(1,17,3)
 MyH323TransportTCP::MyH323TransportTCP(
 				H323EndPoint & endpoint,
 				PIPSocket::Address binding,
-				PBoolean listen)
+				BOOL listen)
 	: H323TransportTCP(endpoint, binding, listen)
 {
 }
 
-PBoolean MyH323TransportTCP::Connect()
+BOOL MyH323TransportTCP::Connect()
 {
 	if (IsListening())
 		return TRUE;
@@ -92,7 +91,7 @@ PBoolean MyH323TransportTCP::Connect()
 }
 #endif
 
-PBoolean MyH323TransportUDP::DiscoverGatekeeper(H323Gatekeeper &gk, H323RasPDU &pdu, const H323TransportAddress &address)
+BOOL MyH323TransportUDP::DiscoverGatekeeper(H323Gatekeeper &gk, H323RasPDU &pdu, const H323TransportAddress &address)
 {
 	PThread *thd = PThread::Current();
 

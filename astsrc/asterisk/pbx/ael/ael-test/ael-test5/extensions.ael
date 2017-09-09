@@ -10,7 +10,7 @@ context hd-queue {
 
 	0 => goto default|0|1;
 	1 => {
-		Dial(u41950@ixtlchochitl.zvbwu.edu);
+		Dial(u41950@svm1.shsu.edu);
 		Congestion(10);
 		Hangup;
 	};
@@ -116,13 +116,12 @@ context huntsville-calling {
 macro dialout( number ) {
 	Realtime(call_info,exten,${CALLERIDNUM:5},mon_);
 	if ("${mon_monitor}" = "YES") {
-		Dial(SIP/${number}@zgw1.zvbwu.edu,,wW);
-		Dial(SIP/${number}@zgw2.zvbwu.edu,,wW);
+		Dial(SIP/${number}@sgw1.shsu.edu,,wW);
+		Dial(SIP/${number}@sgw2.shsu.edu,,wW);
 	} else {
-		Dial(SIP/${number}@zgw1.zvbwu.edu);
-		Dial(SIP/${number}@zgw2.zvbwu.edu);
+		Dial(SIP/${number}@sgw1.shsu.edu);
+		Dial(SIP/${number}@sgw2.shsu.edu);
 	};
-	return;
 };
 
 // Standard extension macro:
@@ -152,7 +151,7 @@ macro stdexten( ext ) {
 			&checkcfb(${ext});
 			break;
 		case "CHANUNAVAIL":
-			Dial(IAX2/asterisk:password@ixtlchochitl.zvbwu.edu/${info_forwardto},25,wW);
+			Dial(IAX2/asterisk:password@scm2.shsu.edu/${info_forwardto},25,wW);
 			MailboxExists(${ext});
 //			if ("${VMBOXEXISTSSTATUS}" = "FAILED") {
 //				Congestion(10);
@@ -183,7 +182,7 @@ macro stdexten( ext ) {
 };
 
 macro uvm( ext ) {
-	Dial(SIP/u${ext}@ixtlchochitl.zvbwu.edu);
+	Dial(SIP/u${ext}@svm1.shsu.edu);
 	Playback(im-sorry);
 	Playback(voice-mail-system);
 	Playback(down);
@@ -192,7 +191,7 @@ macro uvm( ext ) {
 };
 
 macro bvm( ext ) {
-	Dial(SIP/b${ext}@ixtlchochitl.zvbwu.edu);
+	Dial(SIP/b${ext}@svm1.shsu.edu);
 	Playback(im-sorry);
 	Playback(voice-mail-system);
 	Playback(down);
@@ -205,7 +204,6 @@ macro checkdnd( ext ) {
 		NoOp(Do Not Disturb is not active);
 	} else
 		&uvm(${ext});
-	return;
 };
 
 macro checkcf( ext ) {
@@ -215,7 +213,6 @@ macro checkcf( ext ) {
 		} else {
 			Set(info_forwardto=${ext}&SIP/${ext}w);
 		};
-	return;
 };
 
 macro checkcfb( ext ) {
@@ -230,7 +227,6 @@ macro checkcfb( ext ) {
 		Hangup;
 	};
 	&stdexten(${info_forwardbusy});
-	return;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -275,14 +271,14 @@ context test-phinfo {
 
 context long-distance {
 	includes {
-		local1;
+		local;
 	};
 
 	_91XXXXXXXXXX => &dialout(${EXTEN});
 	_9011. => &dialout(${EXTEN});
 };
 
-context local1 {
+context local {
 	includes {
 		default;
 	};
@@ -472,7 +468,7 @@ context app-calltrace-perform {
 		};
 	};
 
-	1 => goto local1|${ct_calltrace}|1;
+	1 => goto local|${ct_calltrace}|1;
 
 	i => {
 		Playback(vm-goodbye);
@@ -695,7 +691,6 @@ macro check-psd-exists ( ext ) {
 		System(/usr/local/bin/create_psd.sh ${ext});
 	} else
 		NoOp(PSD set for ${ext});
-	return;
 };
 
 context app-psd {
@@ -803,7 +798,7 @@ context vm-include {
 
 context vm-direct {
 	s => {
-		Dial(SIP/5555@ixtlchochitl.zvbwu.edu,20);
+		Dial(SIP/5555@svm1.shsu.edu,20);
 		Playback(im-sorry);
 		Playback(voice-mail-system);
 		Playback(down);
@@ -815,7 +810,7 @@ context vm-direct {
 
 context vm-extension {
 	s => {
-		Dial(SIP/62100@ixtlchochitl.zvbwu.edu,20);
+		Dial(SIP/62100@svm1.shsu.edu,20);
 		Playback(im-sorry);
 		Playback(voice-mail-system);
 		Playback(down);
@@ -827,7 +822,7 @@ context vm-extension {
 
 context vm-directory {
 	5556 => {
-		Dial(SIP/5556@ixtlchochitl.zvbwu.edu);
+		Dial(SIP/5556@svm1.shsu.edu);
 		Playback(im-sorry);
 		Playback(voice-mail-system);
 		Playback(down);

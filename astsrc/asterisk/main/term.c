@@ -1,7 +1,7 @@
 /*
  * Asterisk -- An open source telephony toolkit.
  *
- * Copyright (C) 1999 - 2010, Digium, Inc.
+ * Copyright (C) 1999 - 2005, Digium, Inc.
  *
  * Mark Spencer <markster@digium.com>
  *
@@ -18,22 +18,28 @@
 
 /*! \file
  *
- * \brief Terminal Routines
+ * \brief Terminal Routines 
  *
- * \author Mark Spencer <markster@digium.com>
+ * \author Mark Spencer <markster@digium.com> 
  */
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 280020 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 49006 $")
 
-#include "asterisk/_private.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 #include <signal.h>
+#include <errno.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "asterisk/term.h"
+#include "asterisk/options.h"
 #include "asterisk/lock.h"
 #include "asterisk/utils.h"
 
@@ -43,31 +49,17 @@ static char prepdata[80] = "";
 static char enddata[80] = "";
 static char quitdata[80] = "";
 
-static const char * const termpath[] = {
+static const char *termpath[] = {
 	"/usr/share/terminfo",
 	"/usr/local/share/misc/terminfo",
 	"/usr/lib/terminfo",
 	NULL
 	};
 
-static int opposite(int color)
-{
-	int lookup[] = {
-		/* BLACK */ COLOR_BLACK,
-		/* RED */ COLOR_MAGENTA,
-		/* GREEN */ COLOR_GREEN,
-		/* BROWN */ COLOR_BROWN,
-		/* BLUE */ COLOR_CYAN,
-		/* MAGENTA */ COLOR_RED,
-		/* CYAN */ COLOR_BLUE,
-		/* WHITE */ COLOR_BLACK };
-	return color ? lookup[color - 30] : 0;
-}
-
 /* Ripped off from Ross Ridge, but it's public domain code (libmytinfo) */
 static short convshort(char *s)
 {
-	register int a, b;
+	register int a,b;
 
 	a = (int) s[0] & 0377;
 	b = (int) s[1] & 0377;
@@ -87,21 +79,12 @@ int ast_term_init(void)
 	char buffer[512] = "";
 	int termfd = -1, parseokay = 0, i;
 
-	if (ast_opt_no_color) {
+	if (!term)
 		return 0;
-	}
-
-	if (!ast_opt_console) {
-		/* If any remote console is not compatible, we'll strip the color codes at that point */
-		vt100compat = 1;
-		goto end;
-	}
-
-	if (!term) {
+	if (!ast_opt_console || ast_opt_no_color || !ast_opt_no_fork)
 		return 0;
-	}
 
-	for (i = 0;; i++) {
+	for (i=0 ;; i++) {
 		if (termpath[i] == NULL) {
 			break;
 		}
@@ -155,133 +138,100 @@ int ast_term_init(void)
 		}
 	}
 
-end:
 	if (vt100compat) {
 		/* Make commands show up in nice colors */
-		if (ast_opt_light_background) {
-			snprintf(prepdata, sizeof(prepdata), "%c[%dm", ESC, COLOR_BROWN);
-			snprintf(enddata, sizeof(enddata), "%c[%dm", ESC, COLOR_BLACK);
-			snprintf(quitdata, sizeof(quitdata), "%c[0m", ESC);
-		} else if (ast_opt_force_black_background) {
-			snprintf(prepdata, sizeof(prepdata), "%c[%d;%d;%dm", ESC, ATTR_BRIGHT, COLOR_BROWN, COLOR_BLACK + 10);
-			snprintf(enddata, sizeof(enddata), "%c[%d;%d;%dm", ESC, ATTR_RESET, COLOR_WHITE, COLOR_BLACK + 10);
-			snprintf(quitdata, sizeof(quitdata), "%c[0m", ESC);
-		} else {
-			snprintf(prepdata, sizeof(prepdata), "%c[%d;%dm", ESC, ATTR_BRIGHT, COLOR_BROWN);
-			snprintf(enddata, sizeof(enddata), "%c[%d;%dm", ESC, ATTR_RESET, COLOR_WHITE);
-			snprintf(quitdata, sizeof(quitdata), "%c[0m", ESC);
-		}
+		snprintf(prepdata, sizeof(prepdata), "%c[%d;%d;%dm", ESC, ATTR_BRIGHT, COLOR_BROWN, COLOR_BLACK + 10);
+		snprintf(enddata, sizeof(enddata), "%c[%d;%d;%dm", ESC, ATTR_RESET, COLOR_WHITE, COLOR_BLACK + 10);
+		snprintf(quitdata, sizeof(quitdata), "%c[0m", ESC);
 	}
 	return 0;
 }
 
 char *term_color(char *outbuf, const char *inbuf, int fgcolor, int bgcolor, int maxout)
 {
-	int attr = 0;
-
+	int attr=0;
+	char tmp[40];
 	if (!vt100compat) {
 		ast_copy_string(outbuf, inbuf, maxout);
 		return outbuf;
 	}
-	if (!fgcolor) {
+	if (!fgcolor && !bgcolor) {
 		ast_copy_string(outbuf, inbuf, maxout);
 		return outbuf;
 	}
-
-	if (fgcolor & 128) {
-		attr = ast_opt_light_background ? 0 : ATTR_BRIGHT;
-		fgcolor &= ~128;
+	if ((fgcolor & 128) && (bgcolor & 128)) {
+		/* Can't both be highlighted */
+		ast_copy_string(outbuf, inbuf, maxout);
+		return outbuf;
 	}
+	if (!bgcolor)
+		bgcolor = COLOR_BLACK;
 
 	if (bgcolor) {
 		bgcolor &= ~128;
+		bgcolor += 10;
 	}
-
-	if (ast_opt_light_background) {
-		fgcolor = opposite(fgcolor);
+	if (fgcolor & 128) {
+		attr = ATTR_BRIGHT;
+		fgcolor &= ~128;
 	}
-
-	if (ast_opt_force_black_background) {
-		snprintf(outbuf, maxout, "%c[%d;%d;%dm%s%c[%d;%dm", ESC, attr, fgcolor, bgcolor + 10, inbuf, ESC, COLOR_WHITE, COLOR_BLACK + 10);
+	if (fgcolor && bgcolor) {
+		snprintf(tmp, sizeof(tmp), "%d;%d", fgcolor, bgcolor);
+	} else if (bgcolor) {
+		snprintf(tmp, sizeof(tmp), "%d", bgcolor);
+	} else if (fgcolor) {
+		snprintf(tmp, sizeof(tmp), "%d", fgcolor);
+	}
+	if (attr) {
+		snprintf(outbuf, maxout, "%c[%d;%sm%s%c[0;%d;%dm", ESC, attr, tmp, inbuf, ESC, COLOR_WHITE, COLOR_BLACK + 10);
 	} else {
-		snprintf(outbuf, maxout, "%c[%d;%dm%s%c[0m", ESC, attr, fgcolor, inbuf, ESC);
+		snprintf(outbuf, maxout, "%c[%sm%s%c[0;%d;%dm", ESC, tmp, inbuf, ESC, COLOR_WHITE, COLOR_BLACK + 10);
 	}
 	return outbuf;
-}
-
-static void check_fgcolor(int *fgcolor, int *attr)
-{
-	if (*fgcolor & 128) {
-		*attr = ast_opt_light_background ? 0 : ATTR_BRIGHT;
-		*fgcolor &= ~128;
-	}
-	
-	if (ast_opt_light_background) {
-		*fgcolor = opposite(*fgcolor);
-	}
-}
-
-static void check_bgcolor(int *bgcolor)
-{
-	if (*bgcolor) {
-		*bgcolor &= ~128;
-	}
-}
-
-static int check_colors_allowed(int fgcolor)
-{
-	return (!vt100compat || !fgcolor) ? 0 : 1;
-}
-
-int ast_term_color_code(struct ast_str **str, int fgcolor, int bgcolor)
-{
-	int attr = 0;
-
-	if (!check_colors_allowed(fgcolor)) {
-		return -1;
-	}
-
-	check_fgcolor(&fgcolor, &attr);
-	check_bgcolor(&bgcolor);
-	
-	if (ast_opt_force_black_background) {
-		ast_str_append(str, 0, "%c[%d;%d;%dm", ESC, attr, fgcolor, COLOR_BLACK + 10);
-	} else if (bgcolor) {
-		ast_str_append(str, 0, "%c[%d;%d;%dm", ESC, attr, fgcolor, bgcolor + 10);
-	} else {
-		ast_str_append(str, 0, "%c[%d;%dm", ESC, attr, fgcolor);
-	}
-
-	return 0;
 }
 
 char *term_color_code(char *outbuf, int fgcolor, int bgcolor, int maxout)
 {
-	int attr = 0;
-
-	if (!check_colors_allowed(fgcolor)) {
+	int attr=0;
+	char tmp[40];
+	if ((!vt100compat) || (!fgcolor && !bgcolor)) {
 		*outbuf = '\0';
 		return outbuf;
 	}
-
-	check_fgcolor(&fgcolor, &attr);
-	check_bgcolor(&bgcolor);
-
-	if (ast_opt_force_black_background) {
-		snprintf(outbuf, maxout, "%c[%d;%d;%dm", ESC, attr, fgcolor, COLOR_BLACK + 10);
-	} else if (bgcolor) {
-		snprintf(outbuf, maxout, "%c[%d;%d;%dm", ESC, attr, fgcolor, bgcolor + 10);
-	} else {
-		snprintf(outbuf, maxout, "%c[%d;%dm", ESC, attr, fgcolor);
+	if ((fgcolor & 128) && (bgcolor & 128)) {
+		/* Can't both be highlighted */
+		*outbuf = '\0';
+		return outbuf;
 	}
+	if (!bgcolor)
+		bgcolor = COLOR_BLACK;
 
+	if (bgcolor) {
+		bgcolor &= ~128;
+		bgcolor += 10;
+	}
+	if (fgcolor & 128) {
+		attr = ATTR_BRIGHT;
+		fgcolor &= ~128;
+	}
+	if (fgcolor && bgcolor) {
+		snprintf(tmp, sizeof(tmp), "%d;%d", fgcolor, bgcolor);
+	} else if (bgcolor) {
+		snprintf(tmp, sizeof(tmp), "%d", bgcolor);
+	} else if (fgcolor) {
+		snprintf(tmp, sizeof(tmp), "%d", fgcolor);
+	}
+	if (attr) {
+		snprintf(outbuf, maxout, "%c[%d;%sm", ESC, attr, tmp);
+	} else {
+		snprintf(outbuf, maxout, "%c[%sm", ESC, tmp);
+	}
 	return outbuf;
 }
 
-char *term_strip(char *outbuf, const char *inbuf, int maxout)
+char *term_strip(char *outbuf, char *inbuf, int maxout)
 {
-	char *outbuf_ptr = outbuf;
-	const char *inbuf_ptr = inbuf;
+	char *outbuf_ptr = outbuf, *inbuf_ptr = inbuf;
 
 	while (outbuf_ptr < outbuf + maxout) {
 		switch (*inbuf_ptr) {
@@ -306,25 +256,11 @@ char *term_prompt(char *outbuf, const char *inbuf, int maxout)
 		ast_copy_string(outbuf, inbuf, maxout);
 		return outbuf;
 	}
-	if (ast_opt_force_black_background) {
-		snprintf(outbuf, maxout, "%c[%d;%dm%c%c[%d;%dm%s",
-			ESC, COLOR_BLUE, COLOR_BLACK + 10,
-			inbuf[0],
-			ESC, COLOR_WHITE, COLOR_BLACK + 10,
-			inbuf + 1);
-	} else if (ast_opt_light_background) {
-		snprintf(outbuf, maxout, "%c[%d;0m%c%c[%d;0m%s",
-			ESC, COLOR_BLUE,
-			inbuf[0],
-			ESC, COLOR_BLACK,
-			inbuf + 1);
-	} else {
-		snprintf(outbuf, maxout, "%c[%d;%d;0m%c%c[%d;%d;0m%s",
-			ESC, ATTR_BRIGHT, COLOR_BLUE,
-			inbuf[0],
-			ESC, 0, COLOR_WHITE,
-			inbuf + 1);
-	}
+	snprintf(outbuf, maxout, "%c[%d;%d;%dm%c%c[%d;%d;%dm%s",
+		ESC, ATTR_BRIGHT, COLOR_BLUE, COLOR_BLACK + 10,
+		inbuf[0],
+		ESC, 0, COLOR_WHITE, COLOR_BLACK + 10,
+		inbuf + 1);
 	return outbuf;
 }
 

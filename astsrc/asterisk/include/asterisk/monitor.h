@@ -24,17 +24,11 @@
 #define _ASTERISK_MONITOR_H
 
 #include "asterisk/channel.h"
-#include "asterisk/optional_api.h"
 
 enum AST_MONITORING_STATE {
 	AST_MONITOR_RUNNING,
 	AST_MONITOR_PAUSED
 };
-
-/* Streams recording control */
-#define X_REC_IN	1
-#define X_REC_OUT	2
-#define X_JOIN		4
 
 /*! Responsible for channel monitoring data */
 struct ast_channel_monitor {
@@ -51,34 +45,22 @@ struct ast_channel_monitor {
 };
 
 /* Start monitoring a channel */
-AST_OPTIONAL_API(int, ast_monitor_start,
-		 (struct ast_channel *chan, const char *format_spec,
-		  const char *fname_base, int need_lock, int stream_action),
-		 { return -1; });
+int ast_monitor_start(struct ast_channel *chan, const char *format_spec,
+		      const char *fname_base, int need_lock );
 
 /* Stop monitoring a channel */
-AST_OPTIONAL_API(int, ast_monitor_stop,
-		 (struct ast_channel *chan, int need_lock),
-		 { return -1; });
+int ast_monitor_stop(struct ast_channel *chan, int need_lock);
 
 /* Change monitoring filename of a channel */
-AST_OPTIONAL_API(int, ast_monitor_change_fname,
-		 (struct ast_channel *chan, const char *fname_base,
-		  int need_lock),
-		 { return -1; });
+int ast_monitor_change_fname(struct ast_channel *chan,
+			     const char *fname_base, int need_lock);
 
-AST_OPTIONAL_API(void, ast_monitor_setjoinfiles,
-		 (struct ast_channel *chan, int turnon),
-		 { return; });
+void ast_monitor_setjoinfiles(struct ast_channel *chan, int turnon);
 
 /* Pause monitoring of a channel */
-AST_OPTIONAL_API(int, ast_monitor_pause,
-		 (struct ast_channel *chan),
-		 { return -1; });
+int ast_monitor_pause(struct ast_channel *chan);
 
 /* Unpause monitoring of a channel */
-AST_OPTIONAL_API(int, ast_monitor_unpause,
-		 (struct ast_channel *chan),
-		 { return -1; });
+int ast_monitor_unpause(struct ast_channel *chan);
 
 #endif /* _ASTERISK_MONITOR_H */

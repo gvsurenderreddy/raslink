@@ -27,9 +27,13 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 273641 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "asterisk/utils.h"
 #include "fixedjitterbuf.h"
@@ -62,12 +66,12 @@ static int resynch_jb(struct fixed_jb *jb, void *data, long ms, long ts, long no
 
 static inline struct fixed_jb_frame *alloc_jb_frame(struct fixed_jb *jb)
 {
-	return ast_calloc(1, sizeof(*jb));
+	return ast_calloc(1, sizeof(struct fixed_jb_frame));
 }
 
 static inline void release_jb_frame(struct fixed_jb *jb, struct fixed_jb_frame *frame)
 {
-	ast_free(frame);
+	free(frame);
 }
 
 static void get_jb_head(struct fixed_jb *jb, struct fixed_jb_frame *frame)
@@ -105,7 +109,7 @@ struct fixed_jb *fixed_jb_new(struct fixed_jb_conf *conf)
 	/* First copy our config */
 	memcpy(&jb->conf, conf, sizeof(struct fixed_jb_conf));
 
-	/* we don't need the passed config anymore - continue working with the saved one */
+	/* we dont need the passed config anymore - continue working with the saved one */
 	conf = &jb->conf;
 	
 	/* validate the configuration */
@@ -127,7 +131,7 @@ void fixed_jb_destroy(struct fixed_jb *jb)
 	/* jitterbuf MUST be empty before it can be destroyed */
 	ASSERT(jb->frames == NULL);
 	
-	ast_free(jb);
+	free(jb);
 }
 
 

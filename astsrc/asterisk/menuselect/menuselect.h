@@ -37,8 +37,6 @@ struct member;
 struct depend {
 	/*! the name of the dependency */
 	const char *name;
-	/*! the display name of the dependency */
-	const char *displayname;
 	/*! if this dependency is a member, not an external object */
 	struct member *member;
 	/*! for linking */
@@ -48,8 +46,6 @@ struct depend {
 struct conflict {
 	/*! the name of the conflict */
 	const char *name;
-	/*! the display name of the conflict */
-	const char *displayname;
 	/*! if this conflict is a member, not an external object */
 	const struct member *member;
 	/*! for linking */
@@ -59,12 +55,8 @@ struct conflict {
 struct use {
 	/*! the name of the used package */
 	const char *name;
-	/*! the display name of the used package */
-	const char *displayname;
-	/*! if this used package is a member, not an external object */
+	/*! if this dependency is a member, not an external object */
 	struct member *member;
-	/*! if this used package was found */
-	unsigned char met;
 	/*! for linking */
 	AST_LIST_ENTRY(use) list;
 };
@@ -84,8 +76,6 @@ struct member {
 	const char *defaultenabled;
 	/*! Delete these file(s) if this member changes */
 	const char *remove_on_change;
-	/*! Touch these file(s) if this member changes */
-	const char *touch_on_change;
 	/*! This module is currently selected */
 	unsigned int enabled:1;
 	/*! This module was enabled when the config was loaded */
@@ -100,9 +90,6 @@ struct member {
 	  we have included it in the MENUSELECT_BUILD_DEPS line
 	  in the output file */
 	unsigned int build_deps_output:1;
-	/*! This module should never be enabled automatically, but only
-	 * when explicitly set. */
-	unsigned int explicitly_enabled_only:1;
 	/*! dependencies of this module */
 	AST_LIST_HEAD_NOLOCK(, depend) deps;
 	/*! conflicts of this module */
@@ -120,8 +107,6 @@ struct category {
 	const char *displayname;
 	/*! Delete these file(s) if anything in this category changes */
 	const char *remove_on_change;
-	/*! Touch these file(s) if anything in this category changes */
-	const char *touch_on_change;
 	/*! Output what is selected, as opposed to not selected */
 	unsigned int positive_output:1;
 	/*! All choices in this category are mutually exclusive */

@@ -23,13 +23,11 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * Version Info: $Id: ast_h323.h 182722 2009-03-17 20:47:31Z jpeeler $
+ * Version Info: $Id: ast_h323.h 44684 2006-10-07 14:39:34Z pcadach $
  */
 
 #ifndef AST_H323_H
 #define AST_H323_H
-
-#include "ast_ptlib.h"
 
 #define VERSION(a,b,c) ((a)*10000+(b)*100+(c))
 
@@ -40,16 +38,16 @@ class MyH323EndPoint : public H323EndPoint
 public:
 	MyH323EndPoint();
 	int MyMakeCall(const PString &, PString &, void *_callReference, void *_opts);
-	PBoolean ClearCall(const PString &, H323Connection::CallEndReason reason);
-	PBoolean ClearCall(const PString &);
+	BOOL ClearCall(const PString &, H323Connection::CallEndReason reason);
+	BOOL ClearCall(const PString &);
 
 	void OnClosedLogicalChannel(H323Connection &, const H323Channel &);
 	void OnConnectionEstablished(H323Connection &, const PString &);
 	void OnConnectionCleared(H323Connection &, const PString &);
 	virtual H323Connection * CreateConnection(unsigned, void *, H323Transport *, H323SignalPDU *);
 	void SendUserTone(const PString &, char);
-	PBoolean OnConnectionForwarded(H323Connection &, const PString &, const H323SignalPDU &);
-	PBoolean ForwardConnection(H323Connection &, const PString &, const H323SignalPDU &);
+	BOOL OnConnectionForwarded(H323Connection &, const PString &, const H323SignalPDU &);
+	BOOL ForwardConnection(H323Connection &, const PString &, const H323SignalPDU &);
 	void SetEndpointTypeInfo( H225_EndpointType & info ) const;
 	void SetGateway(void);
 	PStringArray SupportedPrefixes;
@@ -71,37 +69,32 @@ public:
 			const H323SignalPDU &,
 			H323SignalPDU &);
 	void OnReceivedReleaseComplete(const H323SignalPDU &);
-	PBoolean OnAlerting(const H323SignalPDU &, const PString &);
-	PBoolean OnSendReleaseComplete(H323SignalPDU &);
-	PBoolean OnReceivedSignalSetup(const H323SignalPDU &);
-	PBoolean OnReceivedFacility(const H323SignalPDU &);
-	PBoolean OnSendSignalSetup(H323SignalPDU &);
-	PBoolean OnStartLogicalChannel(H323Channel &);
-	PBoolean OnClosingLogicalChannel(H323Channel &);
+	BOOL OnAlerting(const H323SignalPDU &, const PString &);
+	BOOL OnSendReleaseComplete(H323SignalPDU &);
+	BOOL OnReceivedSignalSetup(const H323SignalPDU &);
+	BOOL OnReceivedFacility(const H323SignalPDU &);
+	BOOL OnSendSignalSetup(H323SignalPDU &);
+	BOOL OnStartLogicalChannel(H323Channel &);
+	BOOL OnClosingLogicalChannel(H323Channel &);
 	virtual void SendUserInputTone(char tone, unsigned duration = 0, unsigned logicalChannel = 0, unsigned rtpTimestamp = 0);
 	virtual void OnUserInputTone(char, unsigned, unsigned, unsigned);
 	virtual void OnUserInputString(const PString &value);
-	PBoolean OnReceivedProgress(const H323SignalPDU &);
-	PBoolean MySendProgress();
+	BOOL OnReceivedProgress(const H323SignalPDU &);
+	BOOL MySendProgress();
 	void OnSendCapabilitySet(H245_TerminalCapabilitySet &);
 	void OnSetLocalCapabilities();
 	void SetCapabilities(int, int, void *, int);
-	PBoolean OnReceivedCapabilitySet(const H323Capabilities &, const H245_MultiplexCapability *,
+	BOOL OnReceivedCapabilitySet(const H323Capabilities &, const H245_MultiplexCapability *,
 			H245_TerminalCapabilitySetReject &);
 	void SetCause(int _cause) { cause = _cause; };
-	virtual PBoolean StartControlChannel(const H225_TransportAddress & h245Address);
-	void SetCallOptions(void *opts, PBoolean isIncoming);
-	void SetCallDetails(void *callDetails, const H323SignalPDU &setupPDU, PBoolean isIncoming);
+	virtual BOOL StartControlChannel(const H225_TransportAddress & h245Address);
+	void SetCallOptions(void *opts, BOOL isIncoming);
+	void SetCallDetails(void *callDetails, const H323SignalPDU &setupPDU, BOOL isIncoming);
 	virtual H323Connection::CallEndReason SendSignalSetup(const PString&, const H323TransportAddress&);
 #ifdef TUNNELLING
-	virtual PBoolean HandleSignalPDU(H323SignalPDU &pdu);
-	PBoolean EmbedTunneledInfo(H323SignalPDU &pdu);
+	virtual BOOL HandleSignalPDU(H323SignalPDU &pdu);
+	BOOL EmbedTunneledInfo(H323SignalPDU &pdu);
 #endif
-#ifdef H323_H450
-	virtual void OnReceivedLocalCallHold(int linkedId);
-	virtual void OnReceivedLocalCallRetrieve(int linkedId);
-#endif
-	void MyHoldCall(BOOL localHold);
 
 	PString sourceAliases;
 	PString destAliases;
@@ -114,18 +107,17 @@ public:
 	int transfer_capability;
 
 	WORD sessionId;
-	PBoolean bridging;
+	BOOL bridging;
 #ifdef TUNNELLING
 	int remoteTunnelOptions;
 	int tunnelOptions;
 #endif
 
-	unsigned holdHandling;
 	unsigned progressSetup;
 	unsigned progressAlert;
 	int cause;
 
-	RTP_DataFrame::PayloadTypes dtmfCodec[2];
+	RTP_DataFrame::PayloadTypes dtmfCodec;
 	int dtmfMode;
 };
 
@@ -143,45 +135,32 @@ public:
 	~MyH323_ExternalRTPChannel();
 
 	/* Overrides */
-	PBoolean Start(void);
-	PBoolean OnReceivedAckPDU(const H245_H2250LogicalChannelAckParameters & param);
+	BOOL Start(void);
+	BOOL OnReceivedAckPDU(const H245_H2250LogicalChannelAckParameters & param);
 
 protected:
 	BYTE payloadCode;
 
 	PIPSocket::Address localIpAddr;
 	PIPSocket::Address remoteIpAddr;
-	/* Additional functions in order to have chan_h323 compile with H323Plus */
-#if VERSION(OPENH323_MAJOR, OPENH323_MINOR, OPENH323_BUILD) > VERSION(1,19,4)
-	BOOL OnReceivedAltPDU(const H245_ArrayOf_GenericInformation & alternate );
-	BOOL OnSendingAltPDU(H245_ArrayOf_GenericInformation & alternate) const;
-	void OnSendOpenAckAlt(H245_ArrayOf_GenericInformation & alternate) const;
-	BOOL OnReceivedAckAltPDU(const H245_ArrayOf_GenericInformation & alternate);
-#endif
 	WORD localPort;
 	WORD remotePort;
 };
 
-#ifdef H323_H450
-
-#if VERSION(OPENH323_MAJOR, OPENH323_MINOR, OPENH323_BUILD) > VERSION(1,19,4)
-#include <h450/h450pdu.h>
-#else
-#include <h450pdu.h>
-#endif
-
-class MyH4504Handler : public H4504Handler
+/**
+ * The MyProcess is a necessary descendant PProcess class so that the H323EndPoint
+ * objected to be created from within that class. (Solves the who owns main() problem).
+ */
+class MyProcess : public PProcess
 {
-	PCLASSINFO(MyH4504Handler, H4504Handler);
+	PCLASSINFO(MyProcess, PProcess);
 
 public:
-	MyH4504Handler(MyH323Connection &_conn, H450xDispatcher &_disp);
-	virtual void OnReceivedLocalCallHold(int linkedId);
-	virtual void OnReceivedLocalCallRetrieve(int linkedId);
-
-private:
-	MyH323Connection *conn;
+	MyProcess();
+	~MyProcess();
+	void Main();
 };
-#endif
+
+#include "compat_h323.h"
 
 #endif /* !defined AST_H323_H */

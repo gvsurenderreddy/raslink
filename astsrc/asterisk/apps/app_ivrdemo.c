@@ -31,35 +31,30 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 196072 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
 
 #include "asterisk/file.h"
+#include "asterisk/logger.h"
 #include "asterisk/channel.h"
 #include "asterisk/pbx.h"
 #include "asterisk/module.h"
 #include "asterisk/lock.h"
 #include "asterisk/app.h"
 
-/*** DOCUMENTATION
-	<application name="IVRDemo" language="en_US">
-		<synopsis>
-			IVR Demo Application.
-		</synopsis>
-		<syntax>
-			<parameter name="filename" required="true" />
-		</syntax>
-		<description>
-			<para>This is a skeleton application that shows you the basic structure to create your
-			own asterisk applications and demonstrates the IVR demo.</para>
-		</description>
-	</application>
- ***/
-
+static char *tdesc = "IVR Demo Application";
 static char *app = "IVRDemo";
+static char *synopsis = 
+"  This is a skeleton application that shows you the basic structure to create your\n"
+"own asterisk applications and demonstrates the IVR demo.\n";
 
 static int ivr_demo_func(struct ast_channel *chan, void *data)
 {
-	ast_verbose("IVR Demo, data is %s!\n", (char *) data);
+	ast_verbose("IVR Demo, data is %s!\n", (char *)data);
 	return 0;
 }
 
@@ -93,36 +88,45 @@ AST_IVR_DECLARE_MENU(ivr_demo, "IVR Demo Main Menu", 0,
 	{ NULL },
 });
 
-static int skel_exec(struct ast_channel *chan, const char *data)
+
+static int skel_exec(struct ast_channel *chan, void *data)
 {
 	int res=0;
-	char *tmp;
+	struct ast_module_user *u;
 	
 	if (ast_strlen_zero(data)) {
 		ast_log(LOG_WARNING, "skel requires an argument (filename)\n");
 		return -1;
 	}
 	
-	tmp = ast_strdupa(data);
+	u = ast_module_user_add(chan);
 
 	/* Do our thing here */
 
 	if (chan->_state != AST_STATE_UP)
 		res = ast_answer(chan);
 	if (!res)
-		res = ast_ivr_menu_run(chan, &ivr_demo, tmp);
+		res = ast_ivr_menu_run(chan, &ivr_demo, data);
 	
+	ast_module_user_remove(u);
+
 	return res;
 }
 
 static int unload_module(void)
 {
-	return ast_unregister_application(app);
+	int res;
+	
+	res = ast_unregister_application(app);
+
+	ast_module_user_hangup_all();
+	
+	return res;
 }
 
 static int load_module(void)
 {
-	return ast_register_application_xml(app, skel_exec);
+	return ast_register_application(app, skel_exec, tdesc, synopsis);
 }
 
 AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "IVR Demo Application");
