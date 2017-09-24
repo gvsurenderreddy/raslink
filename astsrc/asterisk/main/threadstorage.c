@@ -24,16 +24,18 @@
  */
 
 #include "asterisk.h"
+#include "asterisk/_private.h"
 
-#if defined(DEBUG_THREADLOCALS)
+#if !defined(DEBUG_THREADLOCALS)
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 91208 $")
+void threadstorage_init(void)
+{
+}
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#else /* !defined(DEBUG_THREADLOCALS) */
 
-#include "asterisk/logger.h"
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 198558 $")
+
 #include "asterisk/strings.h"
 #include "asterisk/utils.h"
 #include "asterisk/threadstorage.h"
@@ -51,8 +53,23 @@ struct tls_object {
 };
 
 static AST_LIST_HEAD_NOLOCK_STATIC(tls_objects, tls_object);
-AST_MUTEX_DEFINE_STATIC_NOTRACKING(threadstoragelock);
 
+/* Allow direct use of pthread_mutex_t and friends */
+#undef pthread_mutex_t
+#undef pthread_mutex_lock
+#undef pthread_mutex_unlock
+#undef pthread_mutex_init
+#undef pthread_mutex_destroy
+
+/*!
+ * \brief lock for the tls_objects list
+ *
+ * \note We can not use an ast_mutex_t for this.  The reason is that this
+ *       lock is used within the context of thread-local data destructors,
+ *       and the ast_mutex_* API uses thread-local data.  Allocating more
+ *       thread-local data at that point just causes a memory leak.
+ */
+static pthread_mutex_t threadstoragelock;
 
 void __ast_threadstorage_object_add(void *key, size_t len, const char *file, const char *function, unsigned int line)
 {
@@ -68,33 +85,33 @@ void __ast_threadstorage_object_add(void *key, size_t len, const char *file, con
 	to->line = line;
 	to->thread = pthread_self();
 
-	ast_mutex_lock(&threadstoragelock);
+	pthread_mutex_lock(&threadstoragelock);
 	AST_LIST_INSERT_TAIL(&tls_objects, to, entry);
-	ast_mutex_unlock(&threadstoragelock);
+	pthread_mutex_unlock(&threadstoragelock);
 }
 
 void __ast_threadstorage_object_remove(void *key)
 {
 	struct tls_object *to;
 
-	ast_mutex_lock(&threadstoragelock);
+	pthread_mutex_lock(&threadstoragelock);
 	AST_LIST_TRAVERSE_SAFE_BEGIN(&tls_objects, to, entry) {
 		if (to->key == key) {
-			AST_LIST_REMOVE_CURRENT(&tls_objects, entry);
+			AST_LIST_REMOVE_CURRENT(entry);
 			break;
 		}
 	}
 	AST_LIST_TRAVERSE_SAFE_END;
-	ast_mutex_unlock(&threadstoragelock);
+	pthread_mutex_unlock(&threadstoragelock);
 	if (to)
-		free(to);
+		ast_free(to);
 }
 
 void __ast_threadstorage_object_replace(void *key_old, void *key_new, size_t len)
 {
 	struct tls_object *to;
 
-	ast_mutex_lock(&threadstoragelock);
+	pthread_mutex_lock(&threadstoragelock);
 	AST_LIST_TRAVERSE_SAFE_BEGIN(&tls_objects, to, entry) {
 		if (to->key == key_old) {
 			to->key = key_new;
@@ -103,41 +120,56 @@ void __ast_threadstorage_object_replace(void *key_old, void *key_new, size_t len
 		}
 	}
 	AST_LIST_TRAVERSE_SAFE_END;
-	ast_mutex_unlock(&threadstoragelock);
+	pthread_mutex_unlock(&threadstoragelock);
 }
 
-static int handle_show_allocations(int fd, int argc, char *argv[])
+static char *handle_cli_threadstorage_show_allocations(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
-	char *fn = NULL;
+	const char *fn = NULL;
 	size_t len = 0;
 	unsigned int count = 0;
 	struct tls_object *to;
 
-	if (argc > 3)
-		fn = argv[3];
+	switch (cmd) {
+	case CLI_INIT:
+		e->command = "threadstorage show allocations";
+		e->usage =
+			"Usage: threadstorage show allocations [<file>]\n"
+			"       Dumps a list of all thread-specific memory allocations,\n"
+			"       optionally limited to those from a specific file\n";
+		return NULL;
+	case CLI_GENERATE:
+		return NULL;
+	}
 
-	ast_mutex_lock(&threadstoragelock);
+	if (a->argc > 4)
+		return CLI_SHOWUSAGE;
+
+	if (a->argc > 3)
+		fn = a->argv[3];
+
+	pthread_mutex_lock(&threadstoragelock);
 
 	AST_LIST_TRAVERSE(&tls_objects, to, entry) {
 		if (fn && strcasecmp(to->file, fn))
 			continue;
 
-		ast_cli(fd, "%10d bytes allocated in %20s at line %5d of %25s (thread %p)\n",
+		ast_cli(a->fd, "%10d bytes allocated in %20s at line %5d of %25s (thread %p)\n",
 			(int) to->size, to->function, to->line, to->file, (void *) to->thread);
 		len += to->size;
 		count++;
 	}
 
-	ast_mutex_unlock(&threadstoragelock);
+	pthread_mutex_unlock(&threadstoragelock);
 
-	ast_cli(fd, "%10d bytes allocated in %d allocation%s\n", (int) len, count, count > 1 ? "s" : "");
+	ast_cli(a->fd, "%10d bytes allocated in %d allocation%s\n", (int) len, count, count > 1 ? "s" : "");
 	
-	return RESULT_SUCCESS;
+	return CLI_SUCCESS;
 }
 
-static int handle_show_summary(int fd, int argc, char *argv[])
+static char *handle_cli_threadstorage_show_summary(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
-	char *fn = NULL;
+	const char *fn = NULL;
 	size_t len = 0;
 	unsigned int count = 0;
 	struct tls_object *to;
@@ -149,10 +181,25 @@ static int handle_show_summary(int fd, int argc, char *argv[])
 	} *file;
 	AST_LIST_HEAD_NOLOCK_STATIC(file_summary, file);
 
-	if (argc > 3)
-		fn = argv[3];
+	switch (cmd) {
+	case CLI_INIT:
+		e->command = "threadstorage show summary";
+		e->usage =
+			"Usage: threadstorage show summary [<file>]\n"
+			"       Summarizes thread-specific memory allocations by file, or optionally\n"
+			"       by function, if a file is specified\n";
+		return NULL;
+	case CLI_GENERATE:
+		return NULL;
+	}
 
-	ast_mutex_lock(&threadstoragelock);
+	if (a->argc > 4)
+		return CLI_SHOWUSAGE;
+
+	if (a->argc > 3)
+		fn = a->argv[3];
+
+	pthread_mutex_lock(&threadstoragelock);
 
 	AST_LIST_TRAVERSE(&tls_objects, to, entry) {
 		if (fn && strcasecmp(to->file, fn))
@@ -174,55 +221,34 @@ static int handle_show_summary(int fd, int argc, char *argv[])
 		file->count++;
 	}
 
-	ast_mutex_unlock(&threadstoragelock);
+	pthread_mutex_unlock(&threadstoragelock);
 	
 	AST_LIST_TRAVERSE(&file_summary, file, entry) {
 		len += file->len;
 		count += file->count;
 		if (fn) {
-			ast_cli(fd, "%10d bytes in %d allocation%ss in function %s\n",
+			ast_cli(a->fd, "%10d bytes in %d allocation%ss in function %s\n",
 				(int) file->len, file->count, file->count > 1 ? "s" : "", file->name);
 		} else {
-			ast_cli(fd, "%10d bytes in %d allocation%s in file %s\n",
+			ast_cli(a->fd, "%10d bytes in %d allocation%s in file %s\n",
 				(int) file->len, file->count, file->count > 1 ? "s" : "", file->name);
 		}
 	}
 
-	ast_cli(fd, "%10d bytes allocated in %d allocation%s\n", (int) len, count, count > 1 ? "s" : "");
-	
-	return RESULT_SUCCESS;
+	ast_cli(a->fd, "%10d bytes allocated in %d allocation%s\n", (int) len, count, count > 1 ? "s" : "");
+
+	return CLI_SUCCESS;
 }
 
 static struct ast_cli_entry cli[] = {
-	{
-		.cmda = { "threadstorage", "show", "allocations", NULL },
-		.handler = handle_show_allocations,
-		.summary = "Display outstanding thread local storage allocations",
-		.usage =
-		"Usage: threadstorage show allocations [<file>]\n"
-		"       Dumps a list of all thread-specific memory allocations,\n"
-		"optionally limited to those from a specific file\n",
-	},
-	{
-		.cmda = { "threadstorage", "show", "summary", NULL },
-		.handler = handle_show_summary,
-		.summary = "Summarize outstanding memory allocations",
-		.usage =
-		"Usage: threadstorage show summary [<file>]\n"
-		"       Summarizes thread-specific memory allocations by file, or optionally\n"
-		"by function, if a file is specified\n",
-	},
+	AST_CLI_DEFINE(handle_cli_threadstorage_show_allocations, "Display outstanding thread local storage allocations"),
+	AST_CLI_DEFINE(handle_cli_threadstorage_show_summary,     "Summarize outstanding memory allocations")
 };
 
 void threadstorage_init(void)
 {
-	ast_cli_register_multiple(cli, sizeof(cli) / sizeof(cli[0]));
-}
-
-#else /* !defined(DEBUG_THREADLOCALS) */
-
-void threadstorage_init(void)
-{
+	pthread_mutex_init(&threadstoragelock, NULL);
+	ast_cli_register_multiple(cli, ARRAY_LEN(cli));
 }
 
 #endif /* !defined(DEBUG_THREADLOCALS) */

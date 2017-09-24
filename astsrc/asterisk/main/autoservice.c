@@ -27,22 +27,17 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 278272 $")
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/time.h>
 #include <signal.h>
-#include <errno.h>
-#include <unistd.h>
+
+#include "asterisk/_private.h" /* prototype for ast_autoservice_init() */
 
 #include "asterisk/pbx.h"
 #include "asterisk/frame.h"
 #include "asterisk/sched.h"
-#include "asterisk/options.h"
 #include "asterisk/channel.h"
-#include "asterisk/logger.h"
 #include "asterisk/file.h"
 #include "asterisk/translate.h"
 #include "asterisk/manager.h"
@@ -61,6 +56,10 @@ struct asent {
 	 *  it gets stopped for the last time. */
 	unsigned int use_count;
 	unsigned int orig_end_dtmf_flag:1;
+	unsigned int ignore_frame_types;
+	/*! Frames go on at the head of deferred_frames, so we have the frames
+	 *  from newest to oldest.  As we put them at the head of the readq, we'll
+	 *  end up with them in the right order for the channel's readq. */
 	AST_LIST_HEAD_NOLOCK(, ast_frame) deferred_frames;
 	AST_LIST_ENTRY(asent) list;
 };
@@ -74,6 +73,11 @@ static int as_chan_list_state;
 
 static void *autoservice_run(void *ign)
 {
+	struct ast_frame hangup_frame = {
+		.frametype = AST_FRAME_CONTROL,
+		.subclass.integer = AST_CONTROL_HANGUP,
+	};
+
 	for (;;) {
 		struct ast_channel *mons[MAX_AUTOMONS];
 		struct asent *ents[MAX_AUTOMONS];
@@ -94,7 +98,7 @@ static void *autoservice_run(void *ign)
 		}
 
 		AST_LIST_TRAVERSE(&aslist, as, list) {
-			if (!as->chan->_softhangup) {
+			if (!ast_check_hangup(as->chan)) {
 				if (x < MAX_AUTOMONS) {
 					ents[x] = as;
 					mons[x++] = as->chan;
@@ -107,6 +111,11 @@ static void *autoservice_run(void *ign)
 		AST_LIST_UNLOCK(&aslist);
 
 		if (!x) {
+			/* If we don't sleep, this becomes a busy loop, which causes
+			 * problems when Asterisk runs at a different priority than other
+			 * user processes.  As long as we check for new channels at least
+			 * once every 10ms, we should be fine. */
+			usleep(10000);
 			continue;
 		}
 
@@ -116,45 +125,17 @@ static void *autoservice_run(void *ign)
 		}
 
 		f = ast_read(chan);
-	
+
 		if (!f) {
-			struct ast_frame hangup_frame = { 0, };
 			/* No frame means the channel has been hung up.
 			 * A hangup frame needs to be queued here as ast_waitfor() may
 			 * never return again for the condition to be detected outside
 			 * of autoservice.  So, we'll leave a HANGUP queued up so the
 			 * thread in charge of this channel will know. */
 
-			hangup_frame.frametype = AST_FRAME_CONTROL;
-			hangup_frame.subclass = AST_CONTROL_HANGUP;
-
 			defer_frame = &hangup_frame;
-		} else {
-
-			/* Do not add a default entry in this switch statement.  Each new
-			 * frame type should be addressed directly as to whether it should
-			 * be queued up or not. */
-
-			switch (f->frametype) {
-			/* Save these frames */
-			case AST_FRAME_DTMF_END:
-			case AST_FRAME_CONTROL:
-			case AST_FRAME_TEXT:
-			case AST_FRAME_IMAGE:
-			case AST_FRAME_HTML:
-				defer_frame = f;
-				break;
-
-			/* Throw these frames away */
-			case AST_FRAME_DTMF_BEGIN:
-			case AST_FRAME_VOICE:
-			case AST_FRAME_VIDEO:
-			case AST_FRAME_NULL:
-			case AST_FRAME_IAX:
-			case AST_FRAME_CNG:
-			case AST_FRAME_MODEM:
-				break;
-			}
+		} else if (ast_is_deferrable_frame(f)) {
+			defer_frame = f;
 		}
 
 		if (defer_frame) {
@@ -165,15 +146,22 @@ static void *autoservice_run(void *ign)
 					continue;
 				}
 				
-				if ((dup_f = ast_frdup(defer_frame))) {
-					AST_LIST_INSERT_TAIL(&ents[i]->deferred_frames, dup_f, frame_list);
+				if (defer_frame != f) {
+					if ((dup_f = ast_frdup(defer_frame))) {
+						AST_LIST_INSERT_HEAD(&ents[i]->deferred_frames, dup_f, frame_list);
+					}
+				} else {
+					if ((dup_f = ast_frisolate(defer_frame))) {
+						if (dup_f != defer_frame) {
+							ast_frfree(defer_frame);
+						}
+						AST_LIST_INSERT_HEAD(&ents[i]->deferred_frames, dup_f, frame_list);
+					}
 				}
 				
 				break;
 			}
-		}
-
-		if (f) {
+		} else if (f) {
 			ast_frfree(f);
 		}
 	}
@@ -188,7 +176,6 @@ int ast_autoservice_start(struct ast_channel *chan)
 	int res = 0;
 	struct asent *as;
 
-	/* Check if the channel already has autoservice */
 	AST_LIST_LOCK(&aslist);
 	AST_LIST_TRAVERSE(&aslist, as, list) {
 		if (as->chan == chan) {
@@ -264,13 +251,13 @@ int ast_autoservice_stop(struct ast_channel *chan)
 		if (as->chan == chan) {
 			as->use_count--;
 			if (as->use_count < 1) {
-				AST_LIST_REMOVE_CURRENT(&aslist, list);
+				AST_LIST_REMOVE_CURRENT(list);
 				removed = as;
 			}
 			break;
 		}
 	}
-	AST_LIST_TRAVERSE_SAFE_END
+	AST_LIST_TRAVERSE_SAFE_END;
 
 	if (removed && asthread != AST_PTHREADT_NULL) {
 		pthread_kill(asthread, SIGURG);
@@ -298,13 +285,34 @@ int ast_autoservice_stop(struct ast_channel *chan)
 		ast_clear_flag(chan, AST_FLAG_END_DTMF_ONLY);
 	}
 
+	ast_channel_lock(chan);
 	while ((f = AST_LIST_REMOVE_HEAD(&as->deferred_frames, frame_list))) {
-		ast_queue_frame(chan, f);
+		if (!((1 << f->frametype) & as->ignore_frame_types)) {
+			ast_queue_frame_head(chan, f);
+		}
 		ast_frfree(f);
 	}
+	ast_channel_unlock(chan);
 
 	free(as);
 
+	return res;
+}
+
+int ast_autoservice_ignore(struct ast_channel *chan, enum ast_frame_type ftype)
+{
+	struct asent *as;
+	int res = -1;
+
+	AST_LIST_LOCK(&aslist);
+	AST_LIST_TRAVERSE(&aslist, as, list) {
+		if (as->chan == chan) {
+			res = 0;
+			as->ignore_frame_types |= (1 << ftype);
+			break;
+		}
+	}
+	AST_LIST_UNLOCK(&aslist);
 	return res;
 }
 

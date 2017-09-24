@@ -1,0 +1,2 @@
+#!/bin/sh
+nbscat | sox -t raw -r 44100 -c 2 -s -w - -t raw -r 8000 -c 1 -s -w -

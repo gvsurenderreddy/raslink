@@ -29,6 +29,7 @@ mv /root/.bashrc.orig /root/.bashrc
 # Check and update repository URL
 chmod +x /usr/src/utils/AllStar-build/common/remote-fetch.sh
 /usr/src/utils/AllStar-build/common/remote-fetch.sh
+sleep 0.5
 # Make sure version runs at login
 if [[ "$(grep -ic "/usr/bin/version" /root/.bashrc)" = "1" ]]; then
   sed -i '/\/usr\/bin\/version/d' /root/.bashrc
@@ -44,6 +45,9 @@ chmod +x /usr/src/utils/AllStar-build/common/update-dahdi.sh
 sleep 0.5
 chmod +x /usr/src/utils/AllStar-build/common/update-libpri.sh
 /usr/src/utils/AllStar-build/common/update-libpri.sh
+sleep 0.5
+chmod +x /usr/src/utils/AllStar-build/common/update-nbs.sh
+/usr/src/utils/AllStar-build/common/update-nbs.sh
 sleep 0.5
 chmod +x /usr/src/utils/AllStar-build/common/update-asterisk.sh
 /usr/src/utils/AllStar-build/common/update-asterisk.sh

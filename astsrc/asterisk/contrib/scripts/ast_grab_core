@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: ast_grab_core 77844 2007-07-31 20:59:10Z murf $
+# $Id: ast_grab_core 197824 2009-05-28 21:50:27Z seanbright $
 # lame quickie script to snarf a core of a hung asterisk process.
 # bugs to ast_grab_core, blinky-lights.org  (derrick daugherty)
 
@@ -67,4 +67,4 @@ echo Notifying admins of the core.
 echo Done.
 echo
 echo Reproducible deadlocks should be posted with a full backtrace and instructions
-echo to reproduce the issue at http://bugs.digium.com/    Thanks!
+echo to reproduce the issue at https://issues.asterisk.org/    Thanks!

@@ -90,16 +90,6 @@ if [ -e /usr/bin/rpi-update ]; then
 else
   echo "RPI Update isn't installed; Skipping."
 fi
-subversion=/usr/bin/svn
-echo "Checking Subversion..."
-if [ -e "$subversion" ]; then
-  echo "Removing Subversion; No longer needed for AllStar."
-  apt-get autoremove --purge -y subversion &>/dev/null
-  rm -rf /root/.subversion &>/dev/null
-  echo "Done"
-else
-  echo "Subversion isn't installed; Skipping."
-fi
 echo "Checking required packages..."
 sourcesList=$( grep -ic "#deb-src" /etc/apt/sources.list )
 if [ "$sourcesList" == "1" ]; then

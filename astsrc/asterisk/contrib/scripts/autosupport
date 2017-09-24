@@ -10,7 +10,7 @@
 # License
 #
 
-OUTPUT=$HOME/digiuminfo
+OUTPUT=$HOME/digiuminfo.txt
 
 MYUID=$(id -u);
 
@@ -67,7 +67,7 @@ if [ "$ans" = "y" ]; then
   uname -a >> $OUTPUT;
   echo >> $OUTPUT;
   echo >> $OUTPUT;
-  
+
   echo "------------------" >> $OUTPUT;
   echo "CPU INFO" >> $OUTPUT;
   echo "------------------" >> $OUTPUT;
@@ -101,12 +101,12 @@ if [ "$ans" = "y" ]; then
   echo >> $OUTPUT;
 
   echo "------------------" >> $OUTPUT;
-  echo "ZAPTEL MODULE INFO" >> $OUTPUT;
+  echo "DAHDI MODULE INFO" >> $OUTPUT;
   echo "------------------" >> $OUTPUT;
-  modinfo /lib/modules/$(uname -r)/misc/*.ko >> $OUTPUT;
+  modinfo /lib/modules/$(uname -r)/dahdi/*.ko >> $OUTPUT;
   echo >> $OUTPUT;
   echo >> $OUTPUT;
-  
+
   echo "------------------" >> $OUTPUT;
   echo "OTHER INFO" >> $OUTPUT;
   echo "------------------" >> $OUTPUT;
@@ -129,9 +129,9 @@ if [ "$ans" = "y" ]; then
   echo >> $OUTPUT;
 
   echo "------------------" >> $OUTPUT;
-  echo "ZTTEST" >> $OUTPUT;
+  echo "DAHDI_TEST" >> $OUTPUT;
   echo "------------------" >> $OUTPUT;
-  zttest -c 20 >> $OUTPUT;
+  dahdi_test -c 20 >> $OUTPUT;
   echo >> $OUTPUT;
   echo >> $OUTPUT;
 
@@ -150,21 +150,14 @@ if [ "$ans" = "y" ]; then
   echo >> $OUTPUT;
 
   echo "------------------" >> $OUTPUT;
-  echo "ZAPTEL CONFIG" >> $OUTPUT;
-  echo "------------------" >> $OUTPUT;
-  grep -v '^#' /etc/zaptel.conf >> $OUTPUT;
-  echo >> $OUTPUT;
-  echo >> $OUTPUT;
-
-  echo "------------------" >> $OUTPUT;
-  echo "ZAPATA CONFIG" >> $OUTPUT;
-  echo "------------------" >> $OUTPUT;
-  grep -v '^;' /etc/asterisk/zapata.conf >> $OUTPUT;
-  echo >> $OUTPUT;
-  echo >> $OUTPUT;
-
-  echo "------------------" >> $OUTPUT;
   echo "DAHDI CONFIG" >> $OUTPUT;
+  echo "------------------" >> $OUTPUT;
+  grep -v '^#' /etc/dahdi/system.conf >> $OUTPUT;
+  echo >> $OUTPUT;
+  echo >> $OUTPUT;
+
+  echo "------------------" >> $OUTPUT;
+  echo "CHAN_DAHDI CONFIG" >> $OUTPUT;
   echo "------------------" >> $OUTPUT;
   grep -v '^;' /etc/asterisk/chan_dahdi.conf >> $OUTPUT;
   echo >> $OUTPUT;
@@ -219,7 +212,7 @@ if [ "$login" = "y" ]; then
   echo "Additional login info: "$adinfo >> $OUTPUT
 
   clear
-  echo 
+  echo
   echo "All information has been stored in $OUTPUT,"
   echo "Please attach this file to an email case you already"
   echo "have open with Digium Tech Support."
@@ -232,6 +225,3 @@ else
   echo "have open with Digium Tech Support."
 exit
 fi
-
-
- 

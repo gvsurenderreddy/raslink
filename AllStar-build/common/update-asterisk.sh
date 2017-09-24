@@ -38,9 +38,22 @@ sed -i 's/Say phonetic call sign/Say call sign/' /etc/asterisk/rpt* | sed -i 's/
 sed -i '/res_crypto.so/c\load \=> res_crypto.so ;   Cryptographic Digital Signatures                  ' /etc/asterisk/modules.conf
 # Load app_sendtext module
 sed -i '/app_sendtext.so/c\load \=> app_sendtext.so ;   Send Text Applications                            ' /etc/asterisk/modules.conf
+# Load res_rtp_asterisk module
+if [[ "$(grep -ic "res_rtp_asterisk.so" /etc/asterisk/modules.conf)" = "0" ]]; then
+  sed -i '/res_musiconhold.so/a\
+load \=> res_rtp_asterisk.so ;   RTP Resource                            ' /etc/asterisk.conf
+fi
+# Load app_playtones module
+if [[ "$(grep -ic "app_playtones.so" /etc/asterisk/modules.conf)" = "0" ]]; then
+  sed -i '/app_playback.so/a\
+load \=> app_playtones.so ;   Playtones Application             ' /etc/asterisk/modules.conf
+# Remove res_indications module
+sed -i '/res_indications/d' /etc/asterisk/modules.conf
 # Remove low pass and high pass filter configuration from usbradio
 sed -i -e '/rxlpf \= 0/,+19d' /etc/asterisk/usbradio.conf
-# Increase jbmaxsize in usbradio
+# Set jbmaxsize in usbradio
 sed -i 's/jbmaxsize \= 200/jbmaxsize \= 500/' /etc/asterisk/usbradio*
+# Replace asterisk.conf
+cp /usr/src/utils/AllStar-build/configs/asterisk.conf /etc/asterisk
 echo "Done."
 exit 0
