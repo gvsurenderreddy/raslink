@@ -23,7 +23,6 @@
  * \author Kevin P. Fleming <kpfleming@digium.com>
  */
 
-#include "asterisk/buildinfo.h"
 #include "asterisk/build.h"
 
 const char *ast_build_hostname = BUILD_HOSTNAME;

@@ -11,24 +11,15 @@
 # the GNU General Public License
 #
 
-ASTTOPDIR?=..
--include $(ASTTOPDIR)/menuselect.makeopts
-
 .PHONY: clean all uninstall
 
-AGIS=$(MENUSELECT_AGIS)
+AGIS=agi-test.agi eagi-test eagi-sphinx-test jukebox.agi
 
 ifeq ($(OSARCH),SunOS)
   LIBS+=-lsocket -lnsl
 endif
 
-ifeq ($(OSARCH),mingw32)
-    AGIS:=
-endif
-
 include $(ASTTOPDIR)/Makefile.rules
-
-_ASTCFLAGS+=-DSTANDALONE
 
 all: $(AGIS)
 
@@ -40,7 +31,7 @@ eagi-test: eagi-test.o strcompat.o
 eagi-sphinx-test: eagi-sphinx-test.o
 
 install: all
-	$(INSTALL) -d $(DESTDIR)$(AGI_DIR)
+	mkdir -p $(DESTDIR)$(AGI_DIR)
 	for x in $(AGIS); do $(INSTALL) -m 755 $$x $(DESTDIR)$(AGI_DIR) ; done
 
 uninstall:
@@ -48,7 +39,7 @@ uninstall:
 
 clean:
 	rm -f *.so *.o look eagi-test eagi-sphinx-test
-	rm -f .*.d *.s *.i
+	rm -f .*.o.d .*.oo.d *.s *.i
 	rm -f strcompat.c
 
 ifneq ($(wildcard .*.d),)

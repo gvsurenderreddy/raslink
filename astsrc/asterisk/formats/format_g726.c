@@ -30,9 +30,23 @@
  
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 279472 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 90198 $")
 
-#include "asterisk/mod_format.h"
+#include <unistd.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdlib.h>
+#include <sys/time.h>
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+
+#include "asterisk/lock.h"
+#include "asterisk/options.h"
+#include "asterisk/channel.h"
+#include "asterisk/file.h"
+#include "asterisk/logger.h"
+#include "asterisk/sched.h"
 #include "asterisk/module.h"
 #include "asterisk/endian.h"
 
@@ -64,7 +78,9 @@ static int g726_open(struct ast_filestream *tmp, int rate)
 {
 	struct g726_desc *s = (struct g726_desc *)tmp->_private;
 	s->rate = rate;
-	ast_debug(1, "Created filestream G.726-%dk.\n", 40 - s->rate * 8);
+	if (option_debug)
+		ast_log(LOG_DEBUG, "Created filestream G.726-%dk.\n", 
+				40 - s->rate * 8);
 	return 0;
 }
 
@@ -119,11 +135,11 @@ static struct ast_frame *g726_read(struct ast_filestream *s, int *whennext)
 
 	/* Send a frame from the file to the appropriate channel */
 	s->fr.frametype = AST_FRAME_VOICE;
-	s->fr.subclass.codec = AST_FORMAT_G726;
+	s->fr.subclass = AST_FORMAT_G726;
 	s->fr.mallocd = 0;
 	AST_FRAME_SET_BUFFER(&s->fr, s->buf, AST_FRIENDLY_OFFSET, frame_size[fs->rate]);
 	s->fr.samples = 8 * FRAME_TIME;
-	if ((res = fread(s->fr.data.ptr, 1, s->fr.datalen, s->f)) != s->fr.datalen) {
+	if ((res = fread(s->fr.data, 1, s->fr.datalen, s->f)) != s->fr.datalen) {
 		if (res)
 			ast_log(LOG_WARNING, "Short read (%d) (%s)!\n", res, strerror(errno));
 		return NULL;
@@ -141,9 +157,9 @@ static int g726_write(struct ast_filestream *s, struct ast_frame *f)
 		ast_log(LOG_WARNING, "Asked to write non-voice frame!\n");
 		return -1;
 	}
-	if (f->subclass.codec != AST_FORMAT_G726) {
-		ast_log(LOG_WARNING, "Asked to write non-G726 frame (%s)!\n", 
-						ast_getformatname(f->subclass.codec));
+	if (f->subclass != AST_FORMAT_G726) {
+		ast_log(LOG_WARNING, "Asked to write non-G726 frame (%d)!\n", 
+						f->subclass);
 		return -1;
 	}
 	if (f->datalen % frame_size[fs->rate]) {
@@ -151,7 +167,7 @@ static int g726_write(struct ast_filestream *s, struct ast_frame *f)
 						f->datalen, frame_size[fs->rate]);
 		return -1;
 	}
-	if ((res = fwrite(f->data.ptr, 1, f->datalen, s->f)) != f->datalen) {
+	if ((res = fwrite(f->data, 1, f->datalen, s->f)) != f->datalen) {
 		ast_log(LOG_WARNING, "Bad write (%d/%d): %s\n", 
 				res, frame_size[fs->rate], strerror(errno));
 			return -1;
@@ -241,10 +257,10 @@ static int load_module(void)
 	for (i = 0; f[i].format ; i++) {
 		if (ast_format_register(&f[i])) {	/* errors are fatal */
 			ast_log(LOG_WARNING, "Failed to register format %s.\n", f[i].name);
-			return AST_MODULE_LOAD_FAILURE;
+			return -1;
 		}
 	}
-	return AST_MODULE_LOAD_SUCCESS;
+	return 0;
 }
 
 static int unload_module(void)
@@ -256,10 +272,6 @@ static int unload_module(void)
 			ast_log(LOG_WARNING, "Failed to unregister format %s.\n", f[i].name);
 	}
 	return(0);
-}
+}	
 
-AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, "Raw G.726 (16/24/32/40kbps) data",
-	.load = load_module,
-	.unload = unload_module,
-	.load_pri = AST_MODPRI_APP_DEPEND
-);
+AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "Raw G.726 (16/24/32/40kbps) data");

@@ -712,8 +712,7 @@ overflow_page(hashp)
 #define	OVMSG	"HASH: Out of overflow pages.  Increase page size\n"
 	if (offset > SPLITMASK) {
 		if (++splitnum >= NCACHED) {
-			if (write(STDERR_FILENO, OVMSG, sizeof(OVMSG) - 1) < 0) {
-			}
+			(void)write(STDERR_FILENO, OVMSG, sizeof(OVMSG) - 1);
 			return (0);
 		}
 		hashp->OVFL_POINT = splitnum;
@@ -726,8 +725,7 @@ overflow_page(hashp)
 	if (free_bit == (hashp->BSIZE << BYTE_SHIFT) - 1) {
 		free_page++;
 		if (free_page >= NCACHED) {
-			if (write(STDERR_FILENO, OVMSG, sizeof(OVMSG) - 1) < 0) {
-			}
+			(void)write(STDERR_FILENO, OVMSG, sizeof(OVMSG) - 1);
 			return (0);
 		}
 		/*
@@ -751,8 +749,8 @@ overflow_page(hashp)
 		offset++;
 		if (offset > SPLITMASK) {
 			if (++splitnum >= NCACHED) {
-				if (write(STDERR_FILENO, OVMSG, sizeof(OVMSG) - 1) < 0) {
-				}
+				(void)write(STDERR_FILENO, OVMSG,
+				    sizeof(OVMSG) - 1);
 				return (0);
 			}
 			hashp->OVFL_POINT = splitnum;

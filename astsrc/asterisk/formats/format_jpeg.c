@@ -26,11 +26,25 @@
  
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 279472 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
 
-#include "asterisk/mod_format.h"
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdlib.h>
+#include <sys/time.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <errno.h>
+#include <string.h>
+
+#include "asterisk/channel.h"
+#include "asterisk/file.h"
+#include "asterisk/logger.h"
+#include "asterisk/sched.h"
 #include "asterisk/module.h"
 #include "asterisk/image.h"
+#include "asterisk/lock.h"
 #include "asterisk/endian.h"
 
 static struct ast_frame *jpeg_read_image(int fd, int len)
@@ -48,8 +62,8 @@ static struct ast_frame *jpeg_read_image(int fd, int len)
 	}
 	memset(&fr, 0, sizeof(fr));
 	fr.frametype = AST_FRAME_IMAGE;
-	fr.subclass.codec = AST_FORMAT_JPEG;
-	fr.data.ptr = buf;
+	fr.subclass = AST_FORMAT_JPEG;
+	fr.data = buf;
 	fr.src = "JPEG Read";
 	fr.datalen = len;
 	return ast_frisolate(&fr);
@@ -74,12 +88,12 @@ static int jpeg_write_image(int fd, struct ast_frame *fr)
 		ast_log(LOG_WARNING, "Not an image\n");
 		return -1;
 	}
-	if (fr->subclass.codec != AST_FORMAT_JPEG) {
+	if (fr->subclass != AST_FORMAT_JPEG) {
 		ast_log(LOG_WARNING, "Not a jpeg image\n");
 		return -1;
 	}
 	if (fr->datalen) {
-		res = write(fd, fr->data.ptr, fr->datalen);
+		res = write(fd, fr->data, fr->datalen);
 		if (res != fr->datalen) {
 			ast_log(LOG_WARNING, "Only wrote %d of %d bytes: %s\n", res, fr->datalen, strerror(errno));
 			return -1;
@@ -89,20 +103,18 @@ static int jpeg_write_image(int fd, struct ast_frame *fr)
 }
 
 static struct ast_imager jpeg_format = {
-	.name = "jpg",
-	.desc = "JPEG (Joint Picture Experts Group)",
-	.exts = "jpg|jpeg",
-	.format = AST_FORMAT_JPEG,
-	.read_image = jpeg_read_image,
-	.identify = jpeg_identify,
-	.write_image = jpeg_write_image,
+	"jpg",
+	"JPEG (Joint Picture Experts Group)",
+	"jpg|jpeg",
+	AST_FORMAT_JPEG,
+	jpeg_read_image,
+	jpeg_identify,
+	jpeg_write_image,
 };
 
 static int load_module(void)
 {
-	if (ast_image_register(&jpeg_format))
-		return AST_MODULE_LOAD_FAILURE;
-	return AST_MODULE_LOAD_SUCCESS;
+	return ast_image_register(&jpeg_format);
 }
 
 static int unload_module(void)
@@ -110,10 +122,6 @@ static int unload_module(void)
 	ast_image_unregister(&jpeg_format);
 
 	return 0;
-}
+}	
 
-AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, "jpeg (joint picture experts group) image format",
-	.load = load_module,
-	.unload = unload_module,
-	.load_pri = AST_MODPRI_APP_DEPEND
-);
+AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "JPEG (Joint Picture Experts Group) Image Format");

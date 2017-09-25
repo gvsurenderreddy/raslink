@@ -6,15 +6,6 @@
  *
  */
 
-/*! \file
- * Extended AGI test application
- *
- * This code is released into public domain
- * without any warranty of any kind.
- *
- *	\ingroup agi
- */
-
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -79,9 +70,7 @@ static int read_environment(void)
 	char *val;
 	/* Read environment */
 	for(;;) {
-		if (!fgets(buf, sizeof(buf), stdin)) {
-			return -1;
-		}
+		fgets(buf, sizeof(buf), stdin);
 		if (feof(stdin))
 			return -1;
 		buf[strlen(buf) - 1] = '\0';
@@ -132,9 +121,7 @@ static char *wait_result(void)
 			return NULL;
 		}
 		if (FD_ISSET(STDIN_FILENO, &fds)) {
-			if (!fgets(astresp, sizeof(astresp), stdin)) {
-				return NULL;
-			}
+			fgets(astresp, sizeof(astresp), stdin);
 			if (feof(stdin)) {
 				fprintf(stderr, "Got hungup on apparently\n");
 				return NULL;
@@ -145,10 +132,9 @@ static char *wait_result(void)
 		}
 		if (FD_ISSET(AUDIO_FILENO, &fds)) {
 			res = read(AUDIO_FILENO, audiobuf, sizeof(audiobuf));
-			if ((res > 0) && (sphinx_sock > -1)) {
-				if (write(sphinx_sock, audiobuf, res) < 0) {
-					fprintf(stderr, "write() failed: %s\n", strerror(errno));
-				}
+			if (res > 0) {
+				if (sphinx_sock > -1) 
+					write(sphinx_sock, audiobuf, res);
 			}
 		}
 		if ((sphinx_sock > -1) && FD_ISSET(sphinx_sock, &fds)) {
@@ -223,7 +209,7 @@ int main(int argc, char *argv[])
 	connect_sphinx();
 	tmp = getenv("agi_enhanced");
 	if (tmp) {
-		if (sscanf(tmp, "%30d.%30d", &ver, &subver) != 2)
+		if (sscanf(tmp, "%d.%d", &ver, &subver) != 2)
 			ver = 0;
 	}
 	if (ver < 1) {

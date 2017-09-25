@@ -20,41 +20,45 @@
  *
  * \brief Provide Cryptographic Signature capability
  *
- * \author Mark Spencer <markster@digium.com>
- *
- * \extref Uses the OpenSSL library, available at
- *	http://www.openssl.org/
+ * \author Mark Spencer <markster@digium.com> 
  */
 
 /*** MODULEINFO
-	<depend>openssl</depend>
+	<depend>ssl</depend>
  ***/
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 280058 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 47051 $")
 
-#include "asterisk/paths.h"	/* use ast_config_AST_KEY_DIR */
+#include <sys/types.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#include <openssl/aes.h>
+#include <stdio.h>
 #include <dirent.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
 
+#include "asterisk/file.h"
+#include "asterisk/channel.h"
+#include "asterisk/logger.h"
+#include "asterisk/say.h"
 #include "asterisk/module.h"
+#include "asterisk/options.h"
+#include "asterisk/crypto.h"
 #include "asterisk/md5.h"
 #include "asterisk/cli.h"
 #include "asterisk/io.h"
 #include "asterisk/lock.h"
 #include "asterisk/utils.h"
 
-#define AST_API_MODULE
-#include "asterisk/crypto.h"
-
 /*
  * Asterisk uses RSA keys with SHA-1 message digests for its
  * digital signatures.  The choice of RSA is due to its higher
  * throughput on verification, and the choice of SHA-1 based
- * on the recently discovered collisions in MD5's compression
+ * on the recently discovered collisions in MD5's compression 
  * algorithm and recommendations of avoiding MD5 in new schemes
  * from various industry experts.
  *
@@ -63,148 +67,141 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 280058 $")
  *
  */
 
+/*
+ * XXX This module is not very thread-safe.  It is for everyday stuff
+ *     like reading keys and stuff, but there are all kinds of weird
+ *     races with people running reload and key init at the same time
+ *     for example
+ *
+ * XXXX
+ */
+
+AST_MUTEX_DEFINE_STATIC(keylock);
+
 #define KEY_NEEDS_PASSCODE (1 << 16)
 
 struct ast_key {
-	/*! Name of entity */
+	/* Name of entity */
 	char name[80];
-	/*! File name */
+	/* File name */
 	char fn[256];
-	/*! Key type (AST_KEY_PUB or AST_KEY_PRIV, along with flags from above) */
+	/* Key type (AST_KEY_PUB or AST_KEY_PRIV, along with flags from above) */
 	int ktype;
-	/*! RSA structure (if successfully loaded) */
+	/* RSA structure (if successfully loaded) */
 	RSA *rsa;
-	/*! Whether we should be deleted */
+	/* Whether we should be deleted */
 	int delme;
-	/*! FD for input (or -1 if no input allowed, or -2 if we needed input) */
+	/* FD for input (or -1 if no input allowed, or -2 if we needed input) */
 	int infd;
-	/*! FD for output */
+	/* FD for output */
 	int outfd;
-	/*! Last MD5 Digest */
+	/* Last MD5 Digest */
 	unsigned char digest[16];
-	AST_RWLIST_ENTRY(ast_key) list;
+	struct ast_key *next;
 };
 
-static AST_RWLIST_HEAD_STATIC(keys, ast_key);
+static struct ast_key *keys = NULL;
 
-/*!
- * \brief setting of priv key
- * \param buf
- * \param size
- * \param rwflag
- * \param userdata
- * \return length of string,-1 on failure
-*/
+
+#if 0
+static int fdprint(int fd, char *s)
+{
+        return write(fd, s, strlen(s) + 1);
+}
+#endif
 static int pw_cb(char *buf, int size, int rwflag, void *userdata)
 {
 	struct ast_key *key = (struct ast_key *)userdata;
 	char prompt[256];
-	int res, tmp;
-
-	if (key->infd < 0) {
+	int res;
+	int tmp;
+	if (key->infd > -1) {
+		snprintf(prompt, sizeof(prompt), ">>>> passcode for %s key '%s': ",
+			 key->ktype == AST_KEY_PRIVATE ? "PRIVATE" : "PUBLIC", key->name);
+		write(key->outfd, prompt, strlen(prompt));
+		memset(buf, 0, sizeof(buf));
+		tmp = ast_hide_password(key->infd);
+		memset(buf, 0, size);
+		res = read(key->infd, buf, size);
+		ast_restore_tty(key->infd, tmp);
+		if (buf[strlen(buf) -1] == '\n')
+			buf[strlen(buf) - 1] = '\0';
+		return strlen(buf);
+	} else {
 		/* Note that we were at least called */
 		key->infd = -2;
-		return -1;
 	}
-
-	snprintf(prompt, sizeof(prompt), ">>>> passcode for %s key '%s': ",
-		 key->ktype == AST_KEY_PRIVATE ? "PRIVATE" : "PUBLIC", key->name);
-	if (write(key->outfd, prompt, strlen(prompt)) < 0) {
-		ast_log(LOG_WARNING, "write() failed: %s\n", strerror(errno));
-		key->infd = -2;
-		return -1;
-	}
-	memset(buf, 0, sizeof(buf));
-	tmp = ast_hide_password(key->infd);
-	memset(buf, 0, size);
-	res = read(key->infd, buf, size);
-	ast_restore_tty(key->infd, tmp);
-	if (buf[strlen(buf) -1] == '\n') {
-		buf[strlen(buf) - 1] = '\0';
-	}
-	return strlen(buf);
+	return -1;
 }
 
-/*!
- * \brief return the ast_key structure for name
- * \see ast_key_get
-*/
-struct ast_key * AST_OPTIONAL_API_NAME(ast_key_get)(const char *kname, int ktype)
+static struct ast_key *__ast_key_get(const char *kname, int ktype)
 {
 	struct ast_key *key;
-
-	AST_RWLIST_RDLOCK(&keys);
-	AST_RWLIST_TRAVERSE(&keys, key, list) {
+	ast_mutex_lock(&keylock);
+	key = keys;
+	while(key) {
 		if (!strcmp(kname, key->name) &&
-		    (ktype == key->ktype)) {
+		    (ktype == key->ktype))
 			break;
-		}
+		key = key->next;
 	}
-	AST_RWLIST_UNLOCK(&keys);
-
+	ast_mutex_unlock(&keylock);
 	return key;
 }
 
-/*!
- * \brief load RSA key from file
- * \param dir directory string
- * \param fname name of file
- * \param ifd incoming file descriptor
- * \param ofd outgoing file descriptor
- * \param not2
- * \retval key on success.
- * \retval NULL on failure.
-*/
-static struct ast_key *try_load_key(const char *dir, const char *fname, int ifd, int ofd, int *not2)
+static struct ast_key *try_load_key (char *dir, char *fname, int ifd, int ofd, int *not2)
 {
-	int ktype = 0, found = 0;
-	char *c = NULL, ffname[256];
+	int ktype = 0;
+	char *c = NULL;
+	char ffname[256];
 	unsigned char digest[16];
 	FILE *f;
 	struct MD5Context md5;
 	struct ast_key *key;
 	static int notice = 0;
+	int found = 0;
 
 	/* Make sure its name is a public or private key */
+
 	if ((c = strstr(fname, ".pub")) && !strcmp(c, ".pub")) {
 		ktype = AST_KEY_PUBLIC;
 	} else if ((c = strstr(fname, ".key")) && !strcmp(c, ".key")) {
 		ktype = AST_KEY_PRIVATE;
-	} else {
+	} else
 		return NULL;
-	}
 
 	/* Get actual filename */
 	snprintf(ffname, sizeof(ffname), "%s/%s", dir, fname);
 
+	ast_mutex_lock(&keylock);
+	key = keys;
+	while(key) {
+		/* Look for an existing version already */
+		if (!strcasecmp(key->fn, ffname)) 
+			break;
+		key = key->next;
+	}
+	ast_mutex_unlock(&keylock);
+
 	/* Open file */
-	if (!(f = fopen(ffname, "r"))) {
+	f = fopen(ffname, "r");
+	if (!f) {
 		ast_log(LOG_WARNING, "Unable to open key file %s: %s\n", ffname, strerror(errno));
 		return NULL;
 	}
-
 	MD5Init(&md5);
-	while (!feof(f)) {
+	while(!feof(f)) {
 		/* Calculate a "whatever" quality md5sum of the key */
-		char buf[256] = "";
-		if (!fgets(buf, sizeof(buf), f)) {
-			continue;
-		}
+		char buf[256];
+		memset(buf, 0, 256);
+		fgets(buf, sizeof(buf), f);
 		if (!feof(f)) {
 			MD5Update(&md5, (unsigned char *) buf, strlen(buf));
 		}
 	}
 	MD5Final(digest, &md5);
-
-	/* Look for an existing key */
-	AST_RWLIST_TRAVERSE(&keys, key, list) {
-		if (!strcasecmp(key->fn, ffname)) {
-			break;
-		}
-	}
-
 	if (key) {
-		/* If the MD5 sum is the same, and it isn't awaiting a passcode
+		/* If the MD5 sum is the same, and it isn't awaiting a passcode 
 		   then this is far enough */
 		if (!memcmp(digest, key->digest, 16) &&
 		    !(key->ktype & KEY_NEEDS_PASSCODE)) {
@@ -227,6 +224,11 @@ static struct ast_key *try_load_key(const char *dir, const char *fname, int ifd,
 			return NULL;
 		}
 	}
+	/* At this point we have a key structure (old or new).  Time to
+	   fill it with what we know */
+	/* Gotta lock if this one already exists */
+	if (found)
+		ast_mutex_lock(&keylock);
 	/* First the filename */
 	ast_copy_string(key->fn, ffname, sizeof(key->fn));
 	/* Then the name */
@@ -242,57 +244,79 @@ static struct ast_key *try_load_key(const char *dir, const char *fname, int ifd,
 	/* Reset the file back to the beginning */
 	rewind(f);
 	/* Now load the key with the right method */
-	if (ktype == AST_KEY_PUBLIC) {
+	if (ktype == AST_KEY_PUBLIC)
 		key->rsa = PEM_read_RSA_PUBKEY(f, NULL, pw_cb, key);
-	} else {
+	else
 		key->rsa = PEM_read_RSAPrivateKey(f, NULL, pw_cb, key);
-	}
 	fclose(f);
 	if (key->rsa) {
 		if (RSA_size(key->rsa) == 128) {
 			/* Key loaded okay */
 			key->ktype &= ~KEY_NEEDS_PASSCODE;
-			ast_verb(3, "Loaded %s key '%s'\n", key->ktype == AST_KEY_PUBLIC ? "PUBLIC" : "PRIVATE", key->name);
-			ast_debug(1, "Key '%s' loaded OK\n", key->name);
+			if (option_verbose > 2)
+				ast_verbose(VERBOSE_PREFIX_3 "Loaded %s key '%s'\n", key->ktype == AST_KEY_PUBLIC ? "PUBLIC" : "PRIVATE", key->name);
+			if (option_debug)
+				ast_log(LOG_DEBUG, "Key '%s' loaded OK\n", key->name);
 			key->delme = 0;
-		} else {
+		} else
 			ast_log(LOG_NOTICE, "Key '%s' is not expected size.\n", key->name);
-		}
 	} else if (key->infd != -2) {
 		ast_log(LOG_WARNING, "Key load %s '%s' failed\n",key->ktype == AST_KEY_PUBLIC ? "PUBLIC" : "PRIVATE", key->name);
 		if (ofd > -1) {
 			ERR_print_errors_fp(stderr);
-		} else {
+		} else
 			ERR_print_errors_fp(stderr);
-		}
 	} else {
 		ast_log(LOG_NOTICE, "Key '%s' needs passcode.\n", key->name);
 		key->ktype |= KEY_NEEDS_PASSCODE;
 		if (!notice) {
-			if (!ast_opt_init_keys) {
+			if (!ast_opt_init_keys) 
 				ast_log(LOG_NOTICE, "Add the '-i' flag to the asterisk command line if you want to automatically initialize passcodes at launch.\n");
-			}
 			notice++;
 		}
 		/* Keep it anyway */
 		key->delme = 0;
-		/* Print final notice about "keys init" when done */
+		/* Print final notice about "init keys" when done */
 		*not2 = 1;
 	}
-
-	/* If this is a new key add it to the list */
+	if (found)
+		ast_mutex_unlock(&keylock);
 	if (!found) {
-		AST_RWLIST_INSERT_TAIL(&keys, key, list);
+		ast_mutex_lock(&keylock);
+		key->next = keys;
+		keys = key;
+		ast_mutex_unlock(&keylock);
 	}
-
 	return key;
 }
 
-/*!
- * \brief signs outgoing message with public key
- * \see ast_sign_bin
-*/
-int AST_OPTIONAL_API_NAME(ast_sign_bin)(struct ast_key *key, const char *msg, int msglen, unsigned char *dsig)
+#if 0
+
+static void dump(unsigned char *src, int len)
+{
+	int x; 
+	for (x=0;x<len;x++)
+		printf("%02x", *(src++));
+	printf("\n");
+}
+
+static char *binary(int y, int len)
+{
+	static char res[80];
+	int x;
+	memset(res, 0, sizeof(res));
+	for (x=0;x<len;x++) {
+		if (y & (1 << x))
+			res[(len - x - 1)] = '1';
+		else
+			res[(len - x - 1)] = '0';
+	}
+	return res;
+}
+
+#endif
+
+static int __ast_sign_bin(struct ast_key *key, const char *msg, int msglen, unsigned char *dsig)
 {
 	unsigned char digest[20];
 	unsigned int siglen = 128;
@@ -307,7 +331,9 @@ int AST_OPTIONAL_API_NAME(ast_sign_bin)(struct ast_key *key, const char *msg, in
 	SHA1((unsigned char *)msg, msglen, digest);
 
 	/* Verify signature */
-	if (!(res = RSA_sign(NID_sha1, digest, sizeof(digest), dsig, &siglen, key->rsa))) {
+	res = RSA_sign(NID_sha1, digest, sizeof(digest), dsig, &siglen, key->rsa);
+	
+	if (!res) {
 		ast_log(LOG_WARNING, "RSA Signature (key %s) failed\n", key->name);
 		return -1;
 	}
@@ -318,16 +344,13 @@ int AST_OPTIONAL_API_NAME(ast_sign_bin)(struct ast_key *key, const char *msg, in
 	}
 
 	return 0;
+	
 }
 
-/*!
- * \brief decrypt a message
- * \see ast_decrypt_bin
-*/
-int AST_OPTIONAL_API_NAME(ast_decrypt_bin)(unsigned char *dst, const unsigned char *src, int srclen, struct ast_key *key)
+static int __ast_decrypt_bin(unsigned char *dst, const unsigned char *src, int srclen, struct ast_key *key)
 {
-	int res, pos = 0;
-
+	int res;
+	int pos = 0;
 	if (key->ktype != AST_KEY_PRIVATE) {
 		ast_log(LOG_WARNING, "Cannot decrypt with a public key\n");
 		return -1;
@@ -337,41 +360,36 @@ int AST_OPTIONAL_API_NAME(ast_decrypt_bin)(unsigned char *dst, const unsigned ch
 		ast_log(LOG_NOTICE, "Tried to decrypt something not a multiple of 128 bytes\n");
 		return -1;
 	}
-
-	while (srclen) {
+	while(srclen) {
 		/* Process chunks 128 bytes at a time */
-		if ((res = RSA_private_decrypt(128, src, dst, key->rsa, RSA_PKCS1_OAEP_PADDING)) < 0) {
+		res = RSA_private_decrypt(128, src, dst, key->rsa, RSA_PKCS1_OAEP_PADDING);
+		if (res < 0)
 			return -1;
-		}
 		pos += res;
 		src += 128;
 		srclen -= 128;
 		dst += res;
 	}
-
 	return pos;
 }
 
-/*!
- * \brief encrypt a message
- * \see ast_encrypt_bin
-*/
-int AST_OPTIONAL_API_NAME(ast_encrypt_bin)(unsigned char *dst, const unsigned char *src, int srclen, struct ast_key *key)
+static int __ast_encrypt_bin(unsigned char *dst, const unsigned char *src, int srclen, struct ast_key *key)
 {
-	int res, bytes, pos = 0;
-
+	int res;
+	int bytes;
+	int pos = 0;
 	if (key->ktype != AST_KEY_PUBLIC) {
 		ast_log(LOG_WARNING, "Cannot encrypt with a private key\n");
 		return -1;
 	}
-
-	while (srclen) {
+	
+	while(srclen) {
 		bytes = srclen;
-		if (bytes > 128 - 41) {
+		if (bytes > 128 - 41)
 			bytes = 128 - 41;
-		}
 		/* Process chunks 128-41 bytes at a time */
-		if ((res = RSA_public_encrypt(bytes, src, dst, key->rsa, RSA_PKCS1_OAEP_PADDING)) != 128) {
+		res = RSA_public_encrypt(bytes, src, dst, key->rsa, RSA_PKCS1_OAEP_PADDING);
+		if (res != 128) {
 			ast_log(LOG_NOTICE, "How odd, encrypted size is %d\n", res);
 			return -1;
 		}
@@ -383,28 +401,20 @@ int AST_OPTIONAL_API_NAME(ast_encrypt_bin)(unsigned char *dst, const unsigned ch
 	return pos;
 }
 
-/*!
- * \brief wrapper for __ast_sign_bin then base64 encode it
- * \see ast_sign
-*/
-int AST_OPTIONAL_API_NAME(ast_sign)(struct ast_key *key, char *msg, char *sig)
+static int __ast_sign(struct ast_key *key, char *msg, char *sig)
 {
 	unsigned char dsig[128];
-	int siglen = sizeof(dsig), res;
-
-	if (!(res = ast_sign_bin(key, msg, strlen(msg), dsig))) {
+	int siglen = sizeof(dsig);
+	int res;
+	res = ast_sign_bin(key, msg, strlen(msg), dsig);
+	if (!res)
 		/* Success -- encode (256 bytes max as documented) */
 		ast_base64encode(sig, dsig, siglen, 256);
-	}
-
 	return res;
+	
 }
 
-/*!
- * \brief check signature of a message
- * \see ast_check_signature_bin
-*/
-int AST_OPTIONAL_API_NAME(ast_check_signature_bin)(struct ast_key *key, const char *msg, int msglen, const unsigned char *dsig)
+static int __ast_check_signature_bin(struct ast_key *key, const char *msg, int msglen, const unsigned char *dsig)
 {
 	unsigned char digest[20];
 	int res;
@@ -420,217 +430,171 @@ int AST_OPTIONAL_API_NAME(ast_check_signature_bin)(struct ast_key *key, const ch
 	SHA1((unsigned char *)msg, msglen, digest);
 
 	/* Verify signature */
-	if (!(res = RSA_verify(NID_sha1, digest, sizeof(digest), (unsigned char *)dsig, 128, key->rsa))) {
-		ast_debug(1, "Key failed verification: %s\n", key->name);
+	res = RSA_verify(NID_sha1, digest, sizeof(digest), (unsigned char *)dsig, 128, key->rsa);
+	
+	if (!res) {
+		ast_log(LOG_DEBUG, "Key failed verification: %s\n", key->name);
 		return -1;
 	}
-
 	/* Pass */
 	return 0;
 }
 
-/*!
- * \brief base64 decode then sent to __ast_check_signature_bin
- * \see ast_check_signature
-*/
-int AST_OPTIONAL_API_NAME(ast_check_signature)(struct ast_key *key, const char *msg, const char *sig)
+static int __ast_check_signature(struct ast_key *key, const char *msg, const char *sig)
 {
 	unsigned char dsig[128];
 	int res;
 
 	/* Decode signature */
-	if ((res = ast_base64decode(dsig, sig, sizeof(dsig))) != sizeof(dsig)) {
+	res = ast_base64decode(dsig, sig, sizeof(dsig));
+	if (res != sizeof(dsig)) {
 		ast_log(LOG_WARNING, "Signature improper length (expect %d, got %d)\n", (int)sizeof(dsig), (int)res);
 		return -1;
 	}
-
 	res = ast_check_signature_bin(key, msg, strlen(msg), dsig);
-
 	return res;
 }
 
-int AST_OPTIONAL_API_NAME(ast_crypto_loaded)(void)
-{
-	return 1;
-}
-
-int AST_OPTIONAL_API_NAME(ast_aes_set_encrypt_key)(const unsigned char *key, ast_aes_encrypt_key *ctx)
-{
-	return AES_set_encrypt_key(key, 128, ctx);
-}
-
-int AST_OPTIONAL_API_NAME(ast_aes_set_decrypt_key)(const unsigned char *key, ast_aes_decrypt_key *ctx)
-{
-	return AES_set_decrypt_key(key, 128, ctx);
-}
-
-void AST_OPTIONAL_API_NAME(ast_aes_encrypt)(const unsigned char *in, unsigned char *out, const ast_aes_encrypt_key *ctx)
-{
-	return AES_encrypt(in, out, ctx);
-}
-
-void AST_OPTIONAL_API_NAME(ast_aes_decrypt)(const unsigned char *in, unsigned char *out, const ast_aes_decrypt_key *ctx)
-{
-	return AES_decrypt(in, out, ctx);
-}
-
-/*!
- * \brief refresh RSA keys from file
- * \param ifd file descriptor
- * \param ofd file descriptor
- * \return void
-*/
 static void crypto_load(int ifd, int ofd)
 {
-	struct ast_key *key;
+	struct ast_key *key, *nkey, *last;
 	DIR *dir = NULL;
 	struct dirent *ent;
 	int note = 0;
-
-	AST_RWLIST_WRLOCK(&keys);
-
 	/* Mark all keys for deletion */
-	AST_RWLIST_TRAVERSE(&keys, key, list) {
+	ast_mutex_lock(&keylock);
+	key = keys;
+	while(key) {
 		key->delme = 1;
+		key = key->next;
 	}
-
+	ast_mutex_unlock(&keylock);
 	/* Load new keys */
-	if ((dir = opendir(ast_config_AST_KEY_DIR))) {
-		while ((ent = readdir(dir))) {
-			try_load_key(ast_config_AST_KEY_DIR, ent->d_name, ifd, ofd, &note);
+	dir = opendir((char *)ast_config_AST_KEY_DIR);
+	if (dir) {
+		while((ent = readdir(dir))) {
+			try_load_key((char *)ast_config_AST_KEY_DIR, ent->d_name, ifd, ofd, &note);
 		}
 		closedir(dir);
-	} else {
-		ast_log(LOG_WARNING, "Unable to open key directory '%s'\n", ast_config_AST_KEY_DIR);
-	}
-
+	} else
+		ast_log(LOG_WARNING, "Unable to open key directory '%s'\n", (char *)ast_config_AST_KEY_DIR);
 	if (note) {
-		ast_log(LOG_NOTICE, "Please run the command 'keys init' to enter the passcodes for the keys\n");
+		ast_log(LOG_NOTICE, "Please run the command 'init keys' to enter the passcodes for the keys\n");
 	}
-
-	/* Delete any keys that are no longer present */
-	AST_RWLIST_TRAVERSE_SAFE_BEGIN(&keys, key, list) {
+	ast_mutex_lock(&keylock);
+	key = keys;
+	last = NULL;
+	while(key) {
+		nkey = key->next;
 		if (key->delme) {
-			ast_debug(1, "Deleting key %s type %d\n", key->name, key->ktype);
-			AST_RWLIST_REMOVE_CURRENT(list);
-			if (key->rsa) {
+			ast_log(LOG_DEBUG, "Deleting key %s type %d\n", key->name, key->ktype);
+			/* Do the delete */
+			if (last)
+				last->next = nkey;
+			else
+				keys = nkey;
+			if (key->rsa)
 				RSA_free(key->rsa);
-			}
-			ast_free(key);
-		}
+			free(key);
+		} else 
+			last = key;
+		key = nkey;
 	}
-	AST_RWLIST_TRAVERSE_SAFE_END;
-
-	AST_RWLIST_UNLOCK(&keys);
+	ast_mutex_unlock(&keylock);
 }
 
 static void md52sum(char *sum, unsigned char *md5)
 {
 	int x;
-	for (x = 0; x < 16; x++) {
+	for (x=0;x<16;x++) 
 		sum += sprintf(sum, "%02x", *(md5++));
-	}
 }
 
-/*!
- * \brief show the list of RSA keys
- * \param e CLI command
- * \param cmd
- * \param a list of CLI arguments
- * \return CLI_SUCCESS
-*/
-static char *handle_cli_keys_show(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+static int show_keys(int fd, int argc, char *argv[])
 {
-#define FORMAT "%-18s %-8s %-16s %-33s\n"
-
 	struct ast_key *key;
 	char sum[16 * 2 + 1];
 	int count_keys = 0;
 
-	switch (cmd) {
-	case CLI_INIT:
-		e->command = "keys show";
-		e->usage =
-			"Usage: keys show\n"
-			"       Displays information about RSA keys known by Asterisk\n";
-		return NULL;
-	case CLI_GENERATE:
-		return NULL;
-	}
-
-	ast_cli(a->fd, FORMAT, "Key Name", "Type", "Status", "Sum");
-	ast_cli(a->fd, FORMAT, "------------------", "--------", "----------------", "--------------------------------");
-
-	AST_RWLIST_RDLOCK(&keys);
-	AST_RWLIST_TRAVERSE(&keys, key, list) {
+	ast_mutex_lock(&keylock);
+	key = keys;
+	ast_cli(fd, "%-18s %-8s %-16s %-33s\n", "Key Name", "Type", "Status", "Sum");
+	while(key) {
 		md52sum(sum, key->digest);
-		ast_cli(a->fd, FORMAT, key->name,
+		ast_cli(fd, "%-18s %-8s %-16s %-33s\n", key->name, 
 			(key->ktype & 0xf) == AST_KEY_PUBLIC ? "PUBLIC" : "PRIVATE",
 			key->ktype & KEY_NEEDS_PASSCODE ? "[Needs Passcode]" : "[Loaded]", sum);
+				
+		key = key->next;
 		count_keys++;
 	}
-	AST_RWLIST_UNLOCK(&keys);
-
-	ast_cli(a->fd, "\n%d known RSA keys.\n", count_keys);
-
-	return CLI_SUCCESS;
-
-#undef FORMAT
+	ast_mutex_unlock(&keylock);
+	ast_cli(fd, "%d known RSA keys.\n", count_keys);
+	return RESULT_SUCCESS;
 }
 
-/*!
- * \brief initialize all RSA keys
- * \param e CLI command
- * \param cmd
- * \param a list of CLI arguments
- * \return CLI_SUCCESS
-*/
-static char *handle_cli_keys_init(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
+static int init_keys(int fd, int argc, char *argv[])
 {
 	struct ast_key *key;
 	int ign;
-	char *kn, tmp[256] = "";
+	char *kn;
+	char tmp[256] = "";
 
-	switch (cmd) {
-	case CLI_INIT:
-		e->command = "keys init";
-		e->usage =
-			"Usage: keys init\n"
-			"       Initializes private keys (by reading in pass code from\n"
-			"       the user)\n";
-		return NULL;
-	case CLI_GENERATE:
-		return NULL;
-	}
-
-	if (a->argc != 2) {
-		return CLI_SHOWUSAGE;
-	}
-
-	AST_RWLIST_WRLOCK(&keys);
-	AST_RWLIST_TRAVERSE_SAFE_BEGIN(&keys, key, list) {
+	key = keys;
+	while(key) {
 		/* Reload keys that need pass codes now */
 		if (key->ktype & KEY_NEEDS_PASSCODE) {
 			kn = key->fn + strlen(ast_config_AST_KEY_DIR) + 1;
 			ast_copy_string(tmp, kn, sizeof(tmp));
-			try_load_key(ast_config_AST_KEY_DIR, tmp, a->fd, a->fd, &ign);
+			try_load_key((char *)ast_config_AST_KEY_DIR, tmp, fd, fd, &ign);
 		}
+		key = key->next;
 	}
-	AST_RWLIST_TRAVERSE_SAFE_END
-	AST_RWLIST_UNLOCK(&keys);
-
-	return CLI_SUCCESS;
+	return RESULT_SUCCESS;
 }
 
+static char show_key_usage[] =
+"Usage: keys show\n"
+"       Displays information about RSA keys known by Asterisk\n";
+
+static char init_keys_usage[] =
+"Usage: keys init\n"
+"       Initializes private keys (by reading in pass code from the user)\n";
+
+static struct ast_cli_entry cli_show_keys_deprecated = {
+	{ "show", "keys", NULL },
+	show_keys, NULL,
+	NULL };
+
+static struct ast_cli_entry cli_init_keys_deprecated = {
+	{ "init", "keys", NULL },
+	init_keys, NULL,
+	NULL };
+
 static struct ast_cli_entry cli_crypto[] = {
-	AST_CLI_DEFINE(handle_cli_keys_show, "Displays RSA key information"),
-	AST_CLI_DEFINE(handle_cli_keys_init, "Initialize RSA key passcodes")
+	{ { "keys", "show", NULL },
+	show_keys, "Displays RSA key information",
+	show_key_usage, NULL, &cli_show_keys_deprecated },
+
+	{ { "keys", "init", NULL },
+	init_keys, "Initialize RSA key passcodes",
+	init_keys_usage, NULL, &cli_init_keys_deprecated },
 };
 
-/*! \brief initialise the res_crypto module */
 static int crypto_init(void)
 {
-	ast_cli_register_multiple(cli_crypto, ARRAY_LEN(cli_crypto));
+	SSL_library_init();
+	ERR_load_crypto_strings();
+	ast_cli_register_multiple(cli_crypto, sizeof(cli_crypto) / sizeof(struct ast_cli_entry));
+
+	/* Install ourselves into stubs */
+	ast_key_get = __ast_key_get;
+	ast_check_signature = __ast_check_signature;
+	ast_check_signature_bin = __ast_check_signature_bin;
+	ast_sign = __ast_sign;
+	ast_sign_bin = __ast_sign_bin;
+	ast_encrypt_bin = __ast_encrypt_bin;
+	ast_decrypt_bin = __ast_decrypt_bin;
 	return 0;
 }
 
@@ -643,12 +607,11 @@ static int reload(void)
 static int load_module(void)
 {
 	crypto_init();
-	if (ast_opt_init_keys) {
+	if (ast_opt_init_keys)
 		crypto_load(STDIN_FILENO, STDOUT_FILENO);
-	} else {
+	else
 		crypto_load(-1, -1);
-	}
-	return AST_MODULE_LOAD_SUCCESS;
+	return 0;
 }
 
 static int unload_module(void)
@@ -658,9 +621,8 @@ static int unload_module(void)
 }
 
 /* needs usecount semantics defined */
-AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_GLOBAL_SYMBOLS | AST_MODFLAG_LOAD_ORDER, "Cryptographic Digital Signatures",
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_GLOBAL_SYMBOLS, "Cryptographic Digital Signatures",
 		.load = load_module,
 		.unload = unload_module,
-		.reload = reload,
-		.load_pri = AST_MODPRI_CHANNEL_DEPEND, /*!< Since we don't have a config file, we could move up to REALTIME_DEPEND, if necessary */
+		.reload = reload
 	);

@@ -21,9 +21,7 @@
  * ASTerisk MANager
  *
  */
-
-#include "asterisk.h"
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 159818 $")
+ 
 #include "asterisk.h"
 
 #include <newt.h>
@@ -36,14 +34,13 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 159818 $")
 #include <sys/select.h>
 #include <fcntl.h>
 #include <string.h>
+#include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
 
 #include "asterisk/md5.h"
 #include "asterisk/linkedlists.h"
-
-#define ARRAY_LEN(a) (sizeof(a) / sizeof(a[0]))
 
 #undef gethostbyname
 
@@ -95,7 +92,6 @@ void ast_unregister_file_version(const char *file)
 {
 }
 
-#if !defined(LOW_MEMORY)
 int ast_add_profile(const char *, uint64_t scale);
 int ast_add_profile(const char *s, uint64_t scale)
 {
@@ -112,7 +108,6 @@ int64_t ast_mark(int key, int start1_stop0)
 {
 	return 0;
 }
-#endif /* LOW_MEMORY */
 
 /* end of dummy functions */
 
@@ -135,30 +130,24 @@ static struct ast_chan *find_chan(char *name)
 static void del_chan(char *name)
 {
 	struct ast_chan *chan;
-
 	AST_LIST_TRAVERSE_SAFE_BEGIN(&chans, chan, list) {
 		if (!strcmp(name, chan->name)) {
-			AST_LIST_REMOVE_CURRENT(list);
+			AST_LIST_REMOVE_CURRENT(&chans, list);
 			free(chan);
 			return;
 		}
 	}
-	AST_LIST_TRAVERSE_SAFE_END;
+	AST_LIST_TRAVERSE_SAFE_END
 }
 
-
-static void __attribute__((format(printf, 2, 3))) fdprintf(int fd, char *fmt, ...)
+static void fdprintf(int fd, char *fmt, ...)
 {
 	char stuff[4096];
 	va_list ap;
-	int res;
-
 	va_start(ap, fmt);
 	vsnprintf(stuff, sizeof(stuff), fmt, ap);
 	va_end(ap);
-	if ((res = write(fd, stuff, strlen(stuff))) < 0) {
-		fprintf(stderr, "write() failed: %s\n", strerror(errno));
-	}
+	write(fd, stuff, strlen(stuff));
 }
 
 static char *get_header(struct message *m, char *var)
@@ -241,19 +230,7 @@ static struct event {
 	{ "Status", event_status },
 	{ "Link", event_ignore },
 	{ "Unlink", event_ignore },
-	{ "StatusComplete", event_ignore },
-	{ "Dial", event_ignore },
-	{ "PeerStatus", event_ignore },
-	{ "MessageWaiting", event_ignore },
-	{ "Newcallerid", event_ignore },
-	{ "AGIExec", event_ignore},
-	{ "VarSet", event_ignore},
-	{ "MeetmeTalking", event_ignore},
-	{ "MeetmeJoin", event_ignore},
-	{ "MeetmeLeave", event_ignore},
-	{ "MeetmeEnd", event_ignore},
-	{ "MeetmeMute", event_ignore},
-	{ "Masquerade", event_ignore},
+	{ "StatusComplete", event_ignore }
 };
 
 static int process_message(struct ast_mansession *s, struct message *m)
@@ -265,14 +242,14 @@ static int process_message(struct ast_mansession *s, struct message *m)
 		fprintf(stderr, "Missing event in request");
 		return 0;
 	}
-	for (x = 0; x < ARRAY_LEN(events); x++) {
+	for (x=0;x<sizeof(events) / sizeof(events[0]);x++) {
 		if (!strcasecmp(event, events[x].event)) {
 			if (events[x].func(s, m))
 				return -1;
 			break;
 		}
 	}
-	if (x >= ARRAY_LEN(events))
+	if (x >= sizeof(events) / sizeof(events[0]))
 		fprintf(stderr, "Ignoring unknown event '%s'", event);
 #if 0
 	for (x=0;x<m->hdrcount;x++) {
@@ -416,22 +393,18 @@ static struct message *wait_for_response(int timeout)
 	return NULL;
 }
 
-
-static int __attribute__((format(printf, 2, 3))) manager_action(char *action, char *fmt, ...)
+static int manager_action(char *action, char *fmt, ...)
 {
 	struct ast_mansession *s;
 	char tmp[4096];
 	va_list ap;
-	int res;
 
 	s = &session;
 	fdprintf(s->fd, "Action: %s\r\n", action);
 	va_start(ap, fmt);
 	vsnprintf(tmp, sizeof(tmp), fmt, ap);
 	va_end(ap);
-	if ((res = write(s->fd, tmp, strlen(tmp))) < 0) {
-		fprintf(stderr, "write() failed: %s\n", strerror(errno));
-	}
+	write(s->fd, tmp, strlen(tmp));
 	fdprintf(s->fd, "\r\n");
 	return 0;
 }
@@ -479,7 +452,7 @@ static int hide_doing(void)
 static void try_status(void)
 {
 	struct message *m;
-	manager_action("Status", "%s", "");
+	manager_action("Status", "");
 	m = wait_for_response(10000);
 	if (!m) {
 		show_message("Status Failed", "Timeout waiting for response");
@@ -635,7 +608,7 @@ static int manage_calls(char *host)
 	return 0;
 }
 
-static int manager_login(char *hostname)
+static int login(char *hostname)
 {
 	newtComponent form;
 	newtComponent cancel;
@@ -765,7 +738,7 @@ int main(int argc, char *argv[])
 	newtCls();
 	newtDrawRootText(0, 0, "Asterisk Manager (C)2002, Linux Support Services, Inc.");
 	newtPushHelpLine("Welcome to the Asterisk Manager!");
-	if (manager_login(argv[1])) {
+	if (login(argv[1])) {
 		newtFinished();
 		exit(1);
 	}

@@ -35,8 +35,6 @@
  *
  */
 
-#include "asterisk/autoconfig.h"
-
 #ifdef __Darwin__
 #include <CoreAudio/AudioHardware.h> 
 #elif defined(__linux__) || defined(__FreeBSD__)
@@ -54,7 +52,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-static char *config = "/etc/muted.conf";
+static char *config = "/etc/asterisk/muted.conf";
 
 static char host[256] = "";
 static char user[256] = "";
@@ -116,9 +114,7 @@ static int load_config(void)
 		return -1;
 	}
 	while(!feof(f)) {
-		if (!fgets(buf, sizeof(buf), f)) {
-			continue;
-		}
+		fgets(buf, sizeof(buf), f);
 		if (!feof(f)) {
 			lineno++;
 			val = strchr(buf, '#');
@@ -156,7 +152,7 @@ static int load_config(void)
 			} else if (!strcasecmp(buf, "smoothfade")) {
 				smoothfade = 1;
 			} else if (!strcasecmp(buf, "mutelevel")) {
-				if (val && (sscanf(val, "%3d", &x) == 1) && (x > -1) && (x < 101)) {
+				if (val && (sscanf(val, "%d", &x) == 1) && (x > -1) && (x < 101)) {
 					mutelevel = x;
 				} else 
 					fprintf(stderr, "mutelevel must be a number from 0 (most muted) to 100 (no mute) at line %d\n", lineno);
@@ -216,7 +212,7 @@ static int connect_asterisk(void)
 	if (ports) {
 		*ports = '\0';
 		ports++;
-		if ((sscanf(ports, "%5d", &port) != 1) || (port < 1) || (port > 65535)) {
+		if ((sscanf(ports, "%d", &port) != 1) || (port < 1) || (port > 65535)) {
 			fprintf(stderr, "'%s' is not a valid port number in the hostname\n", ports);
 			return -1;
 		}
@@ -414,19 +410,19 @@ static float mutevol = 0;
 #endif
 
 #ifndef __Darwin__
-static int mutedlevel(int orig, int level)
+static int mutedlevel(int orig, int mutelevel)
 {
 	int l = orig >> 8;
 	int r = orig & 0xff;
-	l = (float)(level) * (float)(l) / 100.0;
-	r = (float)(level) * (float)(r) / 100.0;
+	l = (float)(mutelevel) * (float)(l) / 100.0;
+	r = (float)(mutelevel) * (float)(r) / 100.0;
 
 	return (l << 8) | r;
 #else
-static float mutedlevel(float orig, float level)
+static float mutedlevel(float orig, float mutelevel)
 {
 	float master = orig;
-	master = level * master / 100.0;
+	master = mutelevel * master / 100.0;
 	return master;
 #endif
 	
@@ -684,19 +680,14 @@ int main(int argc, char *argv[])
 		fclose(astf);
 		exit(1);
 	}
-#ifdef HAVE_WORKING_FORK
 	if (needfork) {
 #ifndef HAVE_SBIN_LAUNCHD
-		if (daemon(0,0) < 0) {
-			fprintf(stderr, "daemon() failed: %s\n", strerror(errno));
-			exit(1);
-		}
+		daemon(0,0);
 #else
 		fprintf(stderr, "Mac OS X detected.  Use 'launchd -d muted -f' to launch.\n");
 		exit(1);
 #endif
 	}
-#endif
 	for(;;) {
 		if (wait_event()) {
 			fclose(astf);

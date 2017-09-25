@@ -9,15 +9,20 @@
 # the GNU General Public License
 #
 
--include $(ASTTOPDIR)/menuselect.makeopts $(ASTTOPDIR)/menuselect.makedeps
+-include ../menuselect.makeopts ../menuselect.makedeps
 
-MODULE_PREFIX=chan
 MENUSELECT_CATEGORY=CHANNELS
 MENUSELECT_DESCRIPTION=Channel Drivers
 
+ALL_C_MODS:=$(patsubst %.c,%,$(wildcard chan_*.c))
+ALL_CC_MODS:=$(patsubst %.cc,%,$(wildcard chan_*.cc))
+
+C_MODS:=$(filter-out $(MENUSELECT_CHANNELS),$(ALL_C_MODS))
+CC_MODS:=$(filter-out $(MENUSELECT_CHANNELS),$(ALL_CC_MODS))
+
 ifeq ($(OSARCH),OpenBSD)
-  PTLIB=-lpt
-  H323LIB=-lh323
+  PTLIB=-lpt_OpenBSD_x86_r
+  H323LIB=-lh323_OpenBSD_x86_r
 endif
 
 ifeq ($(OSARCH),linux-gnu)
@@ -38,7 +43,7 @@ ifeq ($(OSARCH),NetBSD)
 endif
 
 ifeq ($(wildcard h323/libchanh323.a),)
-  MODULE_EXCLUDE += chan_h323
+  CC_MODS:=$(filter-out chan_h323,$(CC_MODS))
 endif
 
 ifndef OPENH323DIR
@@ -49,58 +54,77 @@ ifndef PWLIBDIR
   PWLIBDIR=$(HOME)/pwlib
 endif
 
+LOADABLE_MODS:=$(C_MODS) $(CC_MODS)
+
+ifneq ($(findstring channels,$(MENUSELECT_EMBED)),)
+  EMBEDDED_MODS:=$(LOADABLE_MODS)
+  LOADABLE_MODS:=
+endif
+
 all: _all
 
 include $(ASTTOPDIR)/Makefile.moddir_rules
 
-ifneq ($(findstring $(OSARCH), mingw32 cygwin ),)
-  LIBS+= -lres_monitor.so -lres_features.so
-endif
+clean::
+	rm -f busy.h ringtone.h gentone
+	$(MAKE) -C misdn clean
 
 ifneq ($(wildcard h323/Makefile.ast),)
-include h323/Makefile.ast
-endif
-
+  include h323/Makefile.ast
+H323LDFLAGS+=-Wl,--version-script=h323/noexport.map
 clean::
-	$(MAKE) -C misdn clean
-	rm -f sip/*.o sip/*.i
-	rm -f h323/libchanh323.a h323/Makefile.ast h323/*.o h323/*.dep
+	if [ -f h323/Makefile ]; then $(MAKE) -C h323 clean; fi
+else
+h323/libchanh323.a h323/Makefile.ast:
+	$(CMD_PREFIX) $(MAKE) -C h323
+	$(CMD_PREFIX) rm -f ../main/asterisk
+	$(CMD_PREFIX) echo "***************************************************************"
+	$(CMD_PREFIX) echo
+	$(CMD_PREFIX) echo "********** Re-run 'make' to pick up H.323 parameters **********"
+	$(CMD_PREFIX) echo
+	$(CMD_PREFIX) echo "***************************************************************"
+	$(CMD_PREFIX) exit 1
+endif
 
 dist-clean::
 	rm -f h323/Makefile
 
+gentone: gentone.c
+	$(ECHO_PREFIX) echo "   [LD] $^ -> $@"
+	$(CMD_PREFIX) $(HOST_CC) $(STATIC_BUILD) -o $@ $(HOST_CFLAGS) $(HOST_LDFLAGS) $^ $(LIBS)
+gentone: LIBS+=-lm
+
+busy.h: gentone
+	./gentone busy 480 620
+
+ringtone.h: gentone
+	./gentone ringtone 440 480
+
+chan_oss.o: busy.h ringtone.h
+
 $(if $(filter chan_iax2,$(EMBEDDED_MODS)),modules.link,chan_iax2.so): iax2-parser.o iax2-provision.o
-iax2-parser.o iax2-provision.o: _ASTCFLAGS+=$(call MOD_ASTCFLAGS,chan_iax2)
-$(if $(filter chan_sip,$(EMBEDDED_MODS)),modules.link,chan_sip.so): $(subst .c,.o,$(wildcard sip/*.c))
-$(subst .c,.o,$(wildcard sip/*.c)): _ASTCFLAGS+=$(call MOD_ASTCFLAGS,chan_sip)
-$(if $(filter chan_dahdi,$(EMBEDDED_MODS)),modules.link,chan_dahdi.so): sig_analog.o sig_pri.o sig_ss7.o
-sig_analog.o sig_pri.o sig_ss7.o: _ASTCFLAGS+=$(call MOD_ASTCFLAGS,chan_dahdi)
 
-ifneq ($(filter chan_h323,$(EMBEDDED_MODS)),)
-modules.link: h323/libchanh323.a
-else
+chan_alsa.o: busy.h ringtone.h
+
 ifeq ($(OSARCH),linux-gnu)
-chan_h323.so: chan_h323.o h323/libchanh323.a
+chan_h323.so: chan_h323.o h323/libchanh323.a h323/Makefile.ast
 	$(ECHO_PREFIX) echo "   [LD] $^ -> $@"
-	$(CMD_PREFIX) $(CXX) $(PTHREAD_CFLAGS) $(_ASTLDFLAGS) $(ASTLDFLAGS) $(SOLINK) -o $@ $< h323/libchanh323.a $(H323LDLIBS)
+	$(CMD_PREFIX) $(CXX) $(PTHREAD_CFLAGS) $(ASTLDFLAGS) $(SOLINK) $(H323LDFLAGS) -o $@ $< h323/libchanh323.a $(H323LDLIBS)
 else
 chan_h323.so: chan_h323.o h323/libchanh323.a
 	$(ECHO_PREFIX) echo "   [LD] $^ -> $@"
-	$(CMD_PREFIX) $(CXX) $(PTHREAD_CFLAGS) $(_ASTLDFLAGS) $(ASTLDFLAGS) $(SOLINK) -o $@ $< h323/libchanh323.a $(CHANH323LIB) -L$(PWLIBDIR)/lib $(PTLIB) -L$(OPENH323DIR)/lib $(H323LIB) -L/usr/lib -lcrypto -lssl -lexpat
+	$(CMD_PREFIX) $(CXX) $(PTHREAD_CFLAGS) $(ASTLDFLAGS) $(SOLINK) -o $@ $< h323/libchanh323.a $(CHANH323LIB) -L$(PWLIBDIR)/lib $(PTLIB) -L$(OPENH323DIR)/lib $(H323LIB) -L/usr/lib -lcrypto -lssl -lexpat
 endif
-endif
 
-chan_misdn.o: _ASTCFLAGS+=-Imisdn
+chan_misdn.o: ASTCFLAGS+=-Imisdn
 
-misdn_config.o: _ASTCFLAGS+=-Imisdn
+misdn_config.o: ASTCFLAGS+=-Imisdn
 
-misdn/isdn_lib.o: _ASTCFLAGS+=-Wno-strict-aliasing
+misdn/isdn_lib.o: ASTCFLAGS+=-Wno-strict-aliasing
 
-$(if $(filter chan_misdn,$(EMBEDDED_MODS)),modules.link,chan_misdn.so): misdn_config.o misdn/isdn_lib.o misdn/isdn_msg_parser.o
-misdn_config.o misdn/isdn_lib.o misdn/isdn_msg_parser.o: _ASTCFLAGS+=$(call MOD_ASTCFLAGS,chan_misdn)
+misdn_config.o misdn/isdn_lib.o misdn/isdn_msg_parser.o: ASTCFLAGS+=$(MENUSELECT_OPTS_chan_misdn:%=-D%) $(foreach dep,$(MENUSELECT_DEPENDS_chan_misdn),$(value $(dep)_INCLUDE))
 
-$(if $(filter chan_oss,$(EMBEDDED_MODS)),modules.link,chan_oss.so): console_video.o vgrabbers.o console_board.o
-console_video.o vgrabbers.o console_board.o: _ASTCFLAGS+=$(call MOD_ASTCFLAGS,chan_oss)
+$(if $(filter chan_misdn,$(EMBEDDED_MODS)),modules.link,chan_misdn.so): chan_misdn.o misdn_config.o misdn/isdn_lib.o misdn/isdn_msg_parser.o
 
 chan_usbradio.o: chan_usbradio.c xpmr/xpmr.c xpmr/xpmr.h xpmr/xpmr_coef.h xpmr/sinetabx.h busy.h ringtone.h
 

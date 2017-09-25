@@ -23,7 +23,10 @@
 #ifndef _ASTERISK_ASTOBJ_H
 #define _ASTERISK_ASTOBJ_H
 
+#include <string.h>
+
 #include "asterisk/lock.h"
+#include "asterisk/compiler.h"
 
 /*! \file
  * \brief A set of macros implementing objects and containers.
@@ -222,7 +225,7 @@ extern "C" {
 		if (__builtin_expect((object)->refcount > 0, 1)) \
 			newcount = --((object)->refcount); \
 		else \
-			ast_log(AST_LOG_WARNING, "Unreferencing unreferenced (object)!\n"); \
+			ast_log(LOG_WARNING, "Unreferencing unreferenced (object)!\n"); \
 		ASTOBJ_UNLOCK(object); \
 		if (newcount == 0) { \
 			ast_mutex_destroy(&(object)->_lock); \

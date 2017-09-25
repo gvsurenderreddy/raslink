@@ -22,7 +22,9 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 89333 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
+
+#include <string.h>		/* for memcpy() */
 
 #include "asterisk/endian.h"
 #include "asterisk/md5.h"

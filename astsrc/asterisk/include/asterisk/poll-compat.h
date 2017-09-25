@@ -9,7 +9,7 @@
  */
 
 /*---------------------------------------------------------------------------*\
-  $Id: poll-compat.h 284597 2010-09-02 05:00:34Z tilghman $
+  $Id: poll-compat.h 9991 2006-02-14 19:14:15Z kpfleming $
 
   NAME
 
@@ -76,18 +76,8 @@
 	original.
 \*---------------------------------------------------------------------------*/
 
-#ifndef __AST_POLL_COMPAT_H
-#define __AST_POLL_COMPAT_H
-
-#include "asterisk/select.h"
-
-#ifndef AST_POLL_COMPAT
-
-#include <sys/poll.h>
-
-#define ast_poll(a, b, c) poll(a, b, c)
-
-#else /* AST_POLL_COMPAT */
+#ifndef _POLL_EMUL_H_
+#define _POLL_EMUL_H_
 
 #define POLLIN		0x01
 #define POLLPRI		0x02
@@ -96,44 +86,26 @@
 #define POLLHUP		0x10
 #define POLLNVAL	0x20
 
-struct pollfd {
+struct pollfd
+{
     int     fd;
     short   events;
     short   revents;
 };
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-#define ast_poll(a, b, c) ast_internal_poll(a, b, c)
-
-int ast_internal_poll(struct pollfd *pArray, unsigned long n_fds, int timeout);
+#if (__STDC__ > 0) || defined(__cplusplus)
+extern int poll (struct pollfd *pArray, unsigned long n_fds, int timeout);
+#else
+extern int poll();
+#endif
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* AST_POLL_COMPAT */
-
-/*!
- * \brief Same as poll(2), except the time is specified in microseconds and
- * the tv argument is modified to indicate the time remaining.
- */
-int ast_poll2(struct pollfd *pArray, unsigned long n_fds, struct timeval *tv);
-
-/*!
- * \brief Shortcut for conversion of FD_ISSET to poll(2)-based
- */
-static inline int ast_poll_fd_index(struct pollfd *haystack, int nfds, int needle)
-{
-	int i;
-	for (i = 0; i < nfds; i++) {
-		if (haystack[i].fd == needle) {
-			return i;
-		}
-	}
-	return -1;
-}
-
-#endif /* __AST_POLL_COMPAT_H */
+#endif /* _POLL_EMUL_H_ */

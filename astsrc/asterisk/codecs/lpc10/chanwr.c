@@ -29,7 +29,6 @@ Some OSS fixes and a few lpc changes to make it actually work
 	-lf2c -lm   (in that order)
 */
 
-#include <stdlib.h>
 #include "f2c.h"
 
 /* *********************************************************************** */
@@ -229,5 +228,5 @@ L_chanrd:
 /* Subroutine */ int chanrd_(integer *order, integer *ipitv, integer *irms, 
 	integer *irc, integer *ibits)
 {
-    return chanwr_0_(1, order, ipitv, irms, irc, ibits, NULL);
+    return chanwr_0_(1, order, ipitv, irms, irc, ibits, 0);
     }

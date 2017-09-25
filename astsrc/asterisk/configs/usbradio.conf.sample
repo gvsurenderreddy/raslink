@@ -1,61 +1,107 @@
+;
+; chan_usbradio.c configuration file
+;
+; 20101011 0920
+;
+; This sample configuration file is for repeater operation using a pair of
+; GM300, M1225 or CDM1550 mobile radios or a single R1225 repeater 
+; or some other equivalent.
+
 [general]
 
-; General config options, with default values shown.
-; You should use one section per device, with [general] being used
-; for the device.
+[usb]               ; USB Channel Name e.g. usb or usb1, usb2, ...
+                    ; this starts the definition block for a device
 
-; debug = 0x0               ; misc debug flags, default is 0
+hwtype=0		    ; USB Sound Adapter Hardware Type
+			        ; Set to 0 for USB sound adapaters modified using
+			        ; the instructions from usbfob.pdf. 
+			        ; Set to 1 for DingTel/W9SH modified usb adapters.
+ 
+rxboost=0		    ; Rx Audio Boost
+			        ; 0 = 20db attenuator inserted, 
+			        ; 1= 20db attenuator removed
+			        ; Set to 1 for additonal gain if using a low-level
+			        ; receiver output.
 
-; Set the device to use for I/O
-; devicenum = 0
-; Set hardware type here
-; hdwtype=0               ; 0=limey, 1=sph
+rxctcssrelax=1		; Rx CTCSS Decoder Criteria Relax
+			        ; reduce CTCSS talkoff from radios w/o CTCSS Tx HPF
+			        ; Set to 1 for Amateur and FRS radios.
 
-; rxboost=0               ; no rx gain boost
-; rxctcssrelax=1        ; reduce talkoff from radios w/o CTCSS Tx HPF
-; rxctcssfreq=100.0      ; rx ctcss freq in floating point. must be in table
-; txctcssfreq=100.0      ; tx ctcss freq, any frequency permitted
+txctcssdefault=88.5 ; Tx CTCSS Default Encode
+                    ; Encodes this tone if no other tone in use.
 
-; carrierfrom=dsp     ;no,usb,usbinvert,dsp,vox
-; ctcssfrom=dsp       ;no,usb,dsp
+rxctcssfreqs=88.5	; rx ctcss frequency. this must be in the tone table.
+txctcssfreqs=88.5	; tx ctcss frequency. any frequency is permitted.
 
-; rxdemod=flat            ; input type from radio: no,speaker,flat
-; txprelim=yes            ; output is pre-emphasised and limited
-; txtoctype=no            ; no,phase,notone
+carrierfrom=dsp		; Carrier Detect Source
+			        ; Options - no,usb,usbinvert,dsp,vox 
+			        ; no - no carrier detection at all
+			        ; usb - via USB radio adapter COR connection
+			        ; usbinvert - same as above but inverted polarity.
+			        ; dsp - from RX noise using dsp methods
+			        ; vox - voice activated via RX audio
 
-; txmixa=composite        ;no,voice,tone,composite,auxvoice
-; txmixb=no               ;no,voice,tone,composite,auxvoice
+ctcssfrom=dsp		; CTCSS Decoder Source
+			        ; Options = no,usb,dsp
+			        ; no - CTCSS decoding, system will be carrier squelch
+			        ; usb - CTCSS decoding using input from USB adapter 
+			        ; usbinvert - same as above but inverted polarity.
+			        ; dsp - CTCSS decoding using RX audio in DSP.
+			        ; rxdemod option must be set to flat for this to work.
 
-; invertptt=0
+rxdemod=flat        ; Rx Audio Source Type from Radio
+			        ; Options = no, flat, speaker
+			        ; no - RX audio input not used
+			        ; flat - source is un-filtered discriminator signal
+			        ; speaker - source is filtered, de-emphasized audio 
 
-;------------------------------ JITTER BUFFER CONFIGURATION --------------------------
-; jbenable = yes              ; Enables the use of a jitterbuffer on the receiving side of an
-                              ; USBRADIO channel. Defaults to "no". An enabled jitterbuffer will
-                              ; be used only if the sending side can create and the receiving
-                              ; side can not accept jitter. The USBRADIO channel can't accept jitter,
-                              ; thus an enabled jitterbuffer on the receive USBRADIO side will always
-                              ; be used if the sending side can create jitter.
+txprelim=yes		; Tx Audio PreEmphasis and Limiting in software
+			        ; no - Audio is not pre-emphasized and limited. 
+			        ; for application to radio microphone input
+			        ; yes - Audio is pre-emphasized, limited and filtered
+			        ; for direct connection to an FM modulator
 
-; jbmaxsize = 200             ; Max length of the jitterbuffer in milliseconds.
+txtoctype=notone	; Transmit Tone Turn Off Code method: 
+			        ; Options = no,phase,notone
+			        ; no     - CTCSS tone encodes up to tx carrier drop
+			        ; phase  - encode reverse phase before tx carrier drop 
+			        ;          AKA ("reverse burst") before unkeying TX
+			        ; notone - drop tone, wait and then drop carrier
+			        ;          AKA ("chicken burst")
 
-; jbresyncthreshold = 1000    ; Jump in the frame timestamps over which the jitterbuffer is
-                              ; resynchronized. Useful to improve the quality of the voice, with
-                              ; big jumps in/broken timestamps, usualy sent from exotic devices
-                              ; and programs. Defaults to 1000.
+txmixa=composite   	; Tx Mix Output Channel A (Left) Output Type
+			        ; Options = no,voice,tone,composite,auxvoice
+			        ; no - Do not output anything
+			        ; voice - output voice only
+			        ; tone - CTCSS tone only
+			        ; composite - voice and tone
+			        ; auxvoice - voice output for monitoring
 
-; jbimpl = fixed              ; Jitterbuffer implementation, used on the receiving side of an USBRADIO
-                              ; channel. Two implementations are currenlty available - "fixed"
-                              ; (with size always equals to jbmax-size) and "adaptive" (with
-                              ; variable size, actually the new jb of IAX2). Defaults to fixed.
+txmixb=no           ; Tx Mix Output Channel B (Right) Output Type  
+			        ; See txmixa above.
 
-; jbtargetextra = 40          ; This option only affects the jb when 'jbimpl = adaptive' is set.
-                              ; The option represents the number of milliseconds by which the new
-                              ; jitter buffer will pad its size. the default is 40, so without
-                              ; modification, the new jitter buffer will set its size to the jitter
-                              ; value plus 40 milliseconds. increasing this value may help if your
-                              ; network normally has low jitter, but occasionally has spikes.
+invertptt=0         ; Invert PTT 
+			        ; 0 = ground to transmit, 1 = open to transmit
+			        ; This is the collector lead of the 2N4401 transistor
+			        ; on the modified usb sound adapter.
 
-; jblog = no                  ; Enables jitterbuffer frame logging. Defaults to "no".
-;-----------------------------------------------------------------------------------
+duplex=0            ; Connected Radio Device Duplex Capability
+                                ; 0 = Simplex (PTT / Release to Listen)
+                                ; 1 = Duplex (simultaneous Tx and Rx)
+
+eeprom=1            ; 1 = Indicates that an EEPROM internal to the radio
+                    ;     adapter and cable is expected. 
+                    ; 0 = no warning message if no EEPROM found.
 
 
+;gpioX=in	    ; define input/output pin GPIO(x) in,out0,out1 (where X {1..32}) (optional)
+
+
+
+; the following settings are for systems built with an
+; integral synthesized radio only.
+
+rxfreq=146520000    ; Rx Frequency in Hz - must match xcvr capabilities
+txfreq=146520000    ; Tx Frequency in Hz - must match xcvr capabilities
+
+; end of file

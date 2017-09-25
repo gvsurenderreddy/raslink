@@ -26,11 +26,8 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * Version Info: $Id: ast_h323.cxx 265451 2010-05-24 22:05:15Z mmichelson $
+ * Version Info: $Id: ast_h323.cxx 117099 2008-05-19 16:11:27Z root $
  */
-
-#define VERSION(a,b,c) ((a)*10000+(b)*100+(c))
-
 #include <arpa/inet.h>
 
 #include <list>
@@ -42,23 +39,6 @@
 #include <h323pdu.h>
 #include <h323neg.h>
 #include <mediafmt.h>
-
-/* H323 Plus */
-#if VERSION(OPENH323_MAJOR, OPENH323_MINOR, OPENH323_BUILD) > VERSION(1,19,4)
-
-#ifdef H323_H450
-#include "h450/h4501.h"
-#include "h450/h4504.h"
-#include "h450/h45011.h"
-#include "h450/h450pdu.h"
-#endif
-
-#ifdef H323_H460
-#include <h460/h4601.h>
-#endif
-
-#else /* !H323 Plus */
-
 #include <lid.h>
 #ifdef H323_H450
 #include "h4501.h"
@@ -67,16 +47,9 @@
 #include "h450pdu.h"
 #endif
 
-#endif /* H323 Plus */
-
-#include "compat_h323.h"
-
-#include "asterisk.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
-#include "asterisk/compat.h"
 #include "asterisk/logger.h"
 #include "asterisk/channel.h"
 #include "asterisk/astobj.h"
@@ -84,49 +57,22 @@ extern "C" {
 }
 #endif
 
-#undef open
-#undef close
-
 #include "chan_h323.h"
 #include "ast_h323.h"
 #include "cisco-h225.h"
 #include "caps_h323.h"
 
-/* PWLIB_MAJOR renamed to PTLIB_MAJOR in 2.x.x */
-#if (defined(PTLIB_MAJOR) || VERSION(PWLIB_MAJOR, PWLIB_MINOR, PWLIB_BUILD) >= VERSION(1,12,0))
+#include <ptbuildopts.h>
+
+#if PWLIB_MAJOR * 10000 + PWLIB_MINOR * 100 + PWLIB_BUILD >= 1 * 10000 + 12 * 100 + 0
 #define SKIP_PWLIB_PIPE_BUG_WORKAROUND 1
 #endif
 
-///////////////////////////////////////////////
-/* We have to have a PProcess running for the life of the instance to give
- * h323plus a static instance of PProcess to get system information.
- * This class is defined with PDECLARE_PROCESS().  See pprocess.h from pwlib.
- */
-
 /* PWlib Required Components  */
-#if VERSION(OPENH323_MAJOR, OPENH323_MINOR, OPENH323_BUILD) > VERSION(1,19,4)
-#define MAJOR_VERSION 1
-#define MINOR_VERSION 19
-#define BUILD_TYPE    ReleaseCode
-#define BUILD_NUMBER  6
-#else
 #define MAJOR_VERSION 1
 #define MINOR_VERSION 0
 #define BUILD_TYPE    ReleaseCode
 #define BUILD_NUMBER  0
-#endif
- 
-const char *h323manufact = "The NuFone Networks";
-const char *h323product  = "H.323 Channel Driver for Asterisk";
- 
-PDECLARE_PROCESS(MyProcess,PProcess,h323manufact,h323product,MAJOR_VERSION,MINOR_VERSION,BUILD_TYPE,BUILD_NUMBER)
-static MyProcess localProcess;  // active for the life of the DLL
-/* void MyProcess::Main()
-{
-}
-*/
-////////////////////////////////////////////////
-
 
 /** Counter for the number of connections */
 static int channelsOpen;
@@ -137,6 +83,9 @@ static int channelsOpen;
  * FIXME: Singleton this, for safety
  */
 static MyH323EndPoint *endPoint = NULL;
+
+/** PWLib entry point */
+static MyProcess *localProcess = NULL;
 
 #ifndef SKIP_PWLIB_PIPE_BUG_WORKAROUND
 static int _timerChangePipe[2];
@@ -189,7 +138,7 @@ int PAsteriskLog::Buffer::underflow()
 
 int PAsteriskLog::Buffer::sync()
 {
-	char *str = ast_strdup(string);
+	char *str = strdup(string);
 	char *s, *s1;
 	char c;
 
@@ -205,7 +154,7 @@ int PAsteriskLog::Buffer::sync()
 		ast_verbose("%s", s);
 		*s1 = c;
 	}
-	ast_free(str);
+	free(str);
 
 	string = PString();
 	char *base = string.GetPointer(2000);
@@ -225,6 +174,36 @@ static ostream &my_endl(ostream &os)
 #define cout \
 	(logstream ? (PTrace::ClearOptions((unsigned)-1), PTrace::Begin(0, __FILE__, __LINE__)) : std::cout)
 #define endl my_endl
+
+/* Special class designed to call cleanup code on module destruction */
+class MyH323_Shutdown {
+	public:
+	MyH323_Shutdown() { };
+	~MyH323_Shutdown()
+	{
+		h323_end_process();
+	};
+};
+
+MyProcess::MyProcess(): PProcess("The NuFone Networks",
+			"H.323 Channel Driver for Asterisk",
+			MAJOR_VERSION, MINOR_VERSION, BUILD_TYPE, BUILD_NUMBER)
+{
+	/* Call shutdown when module being unload or asterisk has been stopped */
+	static MyH323_Shutdown x;
+
+	/* Fix missed one in PWLib */
+	PX_firstTimeStart = FALSE;
+	Resume();
+}
+
+MyProcess::~MyProcess()
+{
+#ifndef SKIP_PWLIB_PIPE_BUG_WORKAROUND
+	_timerChangePipe[0] = timerChangePipe[0];
+	_timerChangePipe[1] = timerChangePipe[1];
+#endif
+}
 
 void MyProcess::Main()
 {
@@ -351,7 +330,7 @@ void MyH323EndPoint::SetGateway(void)
 	terminalType = e_GatewayOnly;
 }
 
-PBoolean MyH323EndPoint::ClearCall(const PString & token, H323Connection::CallEndReason reason)
+BOOL MyH323EndPoint::ClearCall(const PString & token, H323Connection::CallEndReason reason)
 {
 	if (h323debug) {
 #ifdef PTRACING
@@ -363,7 +342,7 @@ PBoolean MyH323EndPoint::ClearCall(const PString & token, H323Connection::CallEn
 	return H323EndPoint::ClearCall(token, reason);
 }
 
-PBoolean MyH323EndPoint::ClearCall(const PString & token)
+BOOL MyH323EndPoint::ClearCall(const PString & token)
 {
 	if (h323debug) {
 		cout << "\t-- ClearCall: Request to clear call with token " << token << endl;
@@ -391,7 +370,7 @@ void MyH323EndPoint::OnClosedLogicalChannel(H323Connection & connection, const H
 	H323EndPoint::OnClosedLogicalChannel(connection, channel);
 }
 
-PBoolean MyH323EndPoint::OnConnectionForwarded(H323Connection & connection,
+BOOL MyH323EndPoint::OnConnectionForwarded(H323Connection & connection,
 		const PString & forwardParty,
 		const H323SignalPDU & pdu)
 {
@@ -401,7 +380,7 @@ PBoolean MyH323EndPoint::OnConnectionForwarded(H323Connection & connection,
 	return FALSE;
 }
 
-PBoolean MyH323EndPoint::ForwardConnection(H323Connection & connection,
+BOOL MyH323EndPoint::ForwardConnection(H323Connection & connection,
 		const PString & forwardParty,
 		const H323SignalPDU & pdu)
 {
@@ -570,21 +549,12 @@ MyH323Connection::MyH323Connection(MyH323EndPoint & ep, unsigned callReference,
 							unsigned options)
 	: H323Connection(ep, callReference, options)
 {
-#ifdef H323_H450
-	/* Dispatcher will free out all registered handlers */
-	delete h450dispatcher;
-	h450dispatcher = new H450xDispatcher(*this);
-	h4502handler = new H4502Handler(*this, *h450dispatcher);
-	h4504handler = new MyH4504Handler(*this, *h450dispatcher);
-	h4506handler = new H4506Handler(*this, *h450dispatcher);
-	h45011handler = new H45011Handler(*this, *h450dispatcher);
-#endif
 	cause = -1;
 	sessionId = 0;
 	bridging = FALSE;
-	holdHandling = progressSetup = progressAlert = 0;
+	progressSetup = progressAlert = 0;
 	dtmfMode = 0;
-	dtmfCodec[0] = dtmfCodec[1] = (RTP_DataFrame::PayloadTypes)0;
+	dtmfCodec = (RTP_DataFrame::PayloadTypes)0;
 	redirect_reason = -1;
 	transfer_capability = -1;
 #ifdef TUNNELLING
@@ -604,9 +574,9 @@ MyH323Connection::~MyH323Connection()
 	return;
 }
 
-PBoolean MyH323Connection::OnReceivedProgress(const H323SignalPDU &pdu)
+BOOL MyH323Connection::OnReceivedProgress(const H323SignalPDU &pdu)
 {
-	PBoolean isInband;
+	BOOL isInband;
 	unsigned pi;
 
 	if (!H323Connection::OnReceivedProgress(pdu)) {
@@ -632,7 +602,7 @@ PBoolean MyH323Connection::OnReceivedProgress(const H323SignalPDU &pdu)
 	return connectionState != ShuttingDownConnection;
 }
 
-PBoolean MyH323Connection::MySendProgress()
+BOOL MyH323Connection::MySendProgress()
 {
 	/* The code taken from H323Connection::AnsweringCall() but ALWAYS send
 	   PROGRESS message, including slow start operations */
@@ -712,7 +682,7 @@ H323Connection::AnswerCallResponse MyH323Connection::OnAnswerCall(const PString 
 	return ((pi || (fastStartState != FastStartDisabled)) ? AnswerCallDeferredWithMedia : AnswerCallDeferred);
 }
 
-PBoolean MyH323Connection::OnAlerting(const H323SignalPDU & alertingPDU, const PString & username)
+BOOL MyH323Connection::OnAlerting(const H323SignalPDU & alertingPDU, const PString & username)
 {
 	if (h323debug) {
 		cout << "\t=-= In OnAlerting for call " << GetCallReference()
@@ -721,7 +691,7 @@ PBoolean MyH323Connection::OnAlerting(const H323SignalPDU & alertingPDU, const P
 	}
 
 	if (on_progress) {
-		PBoolean isInband;
+		BOOL isInband;
 		unsigned alertingPI;
 
 		if (!alertingPDU.GetQ931().GetProgressIndicator(alertingPI)) {
@@ -745,15 +715,13 @@ PBoolean MyH323Connection::OnAlerting(const H323SignalPDU & alertingPDU, const P
 	return connectionState != ShuttingDownConnection;
 }
 
-void MyH323Connection::SetCallOptions(void *o, PBoolean isIncoming)
+void MyH323Connection::SetCallOptions(void *o, BOOL isIncoming)
 {
 	call_options_t *opts = (call_options_t *)o;
 
 	progressSetup = opts->progress_setup;
 	progressAlert = opts->progress_alert;
-	holdHandling = opts->holdHandling;
-	dtmfCodec[0] = (RTP_DataFrame::PayloadTypes)opts->dtmfcodec[0];
-	dtmfCodec[1] = (RTP_DataFrame::PayloadTypes)opts->dtmfcodec[1];
+	dtmfCodec = (RTP_DataFrame::PayloadTypes)opts->dtmfcodec;
 	dtmfMode = opts->dtmfmode;
 
 	if (isIncoming) {
@@ -776,7 +744,7 @@ void MyH323Connection::SetCallOptions(void *o, PBoolean isIncoming)
 	tunnelOptions = opts->tunnelOptions;
 }
 
-void MyH323Connection::SetCallDetails(void *callDetails, const H323SignalPDU &setupPDU, PBoolean isIncoming)
+void MyH323Connection::SetCallDetails(void *callDetails, const H323SignalPDU &setupPDU, BOOL isIncoming)
 {
 	PString sourceE164;
 	PString destE164;
@@ -871,7 +839,7 @@ void MyH323Connection::SetCallDetails(void *callDetails, const H323SignalPDU &se
 }
 
 #ifdef TUNNELLING
-static PBoolean FetchInformationElements(Q931 &q931, const PBYTEArray &data)
+static BOOL FetchInformationElements(Q931 &q931, const PBYTEArray &data)
 {
 	PINDEX offset = 0;
 
@@ -929,9 +897,9 @@ static PBoolean FetchInformationElements(Q931 &q931, const PBYTEArray &data)
 	return TRUE;
 }
 
-static PBoolean FetchCiscoTunneledInfo(Q931 &q931, const H323SignalPDU &pdu)
+static BOOL FetchCiscoTunneledInfo(Q931 &q931, const H323SignalPDU &pdu)
 {
-	PBoolean res = FALSE;
+	BOOL res = FALSE;
 	const H225_H323_UU_PDU &uuPDU = pdu.m_h323_uu_pdu;
 
 	if(uuPDU.HasOptionalField(H225_H323_UU_PDU::e_nonStandardControl)) {
@@ -948,7 +916,7 @@ static PBoolean FetchCiscoTunneledInfo(Q931 &q931, const H323SignalPDU &pdu)
 					CISCO_H225_H323_UU_NonStdInfo c;
 					PPER_Stream strm(data);
 					if (c.Decode(strm)) {
-						PBoolean haveIEs = FALSE;
+						BOOL haveIEs = FALSE;
 						if (h323debug)
 							cout << setprecision(0) << "H323_UU_NonStdInfo = " << c << endl;
 						if (c.HasOptionalField(CISCO_H225_H323_UU_NonStdInfo::e_protoParam)) {
@@ -973,23 +941,23 @@ static PBoolean FetchCiscoTunneledInfo(Q931 &q931, const H323SignalPDU &pdu)
 	return res;
 }
 
-static PBoolean EmbedCiscoTunneledInfo(H323SignalPDU &pdu)
+static BOOL EmbedCiscoTunneledInfo(H323SignalPDU &pdu)
 {
-	static const struct {
+	const static struct {
 		Q931::InformationElementCodes ie;
-		PBoolean dontDelete;
+		BOOL dontDelete;
 	} codes[] = {
 		{ Q931::RedirectingNumberIE, },
 		{ Q931::FacilityIE, },
 //		{ Q931::CallingPartyNumberIE, TRUE },
 	};
 
-	PBoolean res = FALSE;
-	PBoolean notRedirOnly = FALSE;
+	BOOL res = FALSE;
+	BOOL notRedirOnly = FALSE;
 	Q931 tmpQ931;
 	Q931 &q931 = pdu.GetQ931();
 
-	for(unsigned i = 0; i < ARRAY_LEN(codes); ++i) {
+	for(unsigned i = 0; i < (sizeof(codes) / sizeof(codes[0])); ++i) {
 		if (q931.HasIE(codes[i].ie)) {
 			tmpQ931.SetIE(codes[i].ie, q931.GetIE(codes[i].ie));
 			if (!codes[i].dontDelete)
@@ -1043,9 +1011,9 @@ static PBoolean EmbedCiscoTunneledInfo(H323SignalPDU &pdu)
 
 static const char OID_QSIG[] = "1.3.12.9";
 
-static PBoolean FetchQSIGTunneledInfo(Q931 &q931, const H323SignalPDU &pdu)
+static BOOL FetchQSIGTunneledInfo(Q931 &q931, const H323SignalPDU &pdu)
 {
-	PBoolean res = FALSE;
+	BOOL res = FALSE;
 	const H225_H323_UU_PDU &uuPDU = pdu.m_h323_uu_pdu;
 	if (uuPDU.HasOptionalField(H225_H323_UU_PDU::e_tunnelledSignallingMessage)) {
 		const H225_H323_UU_PDU_tunnelledSignallingMessage &sig = uuPDU.m_tunnelledSignallingMessage;
@@ -1093,7 +1061,7 @@ static H225_EndpointType *GetEndpointType(H323SignalPDU &pdu)
 	return NULL;
 }
 
-static PBoolean QSIGTunnelRequested(H323SignalPDU &pdu)
+static BOOL QSIGTunnelRequested(H323SignalPDU &pdu)
 {
 	H225_EndpointType *epType = GetEndpointType(pdu);
 	if (epType) {
@@ -1112,9 +1080,9 @@ static PBoolean QSIGTunnelRequested(H323SignalPDU &pdu)
 	return FALSE;
 }
 
-static PBoolean EmbedQSIGTunneledInfo(H323SignalPDU &pdu)
+static BOOL EmbedQSIGTunneledInfo(H323SignalPDU &pdu)
 {
-	static const Q931::InformationElementCodes codes[] =
+	const static Q931::InformationElementCodes codes[] =
 	{ Q931::RedirectingNumberIE, Q931::FacilityIE };
 
 	Q931 &q931 = pdu.GetQ931();
@@ -1123,7 +1091,7 @@ static PBoolean EmbedQSIGTunneledInfo(H323SignalPDU &pdu)
 	q931.Encode(message);
 
 	/* Remove non-standard IEs */
-	for(unsigned i = 0; i < ARRAY_LEN(codes); ++i) {
+	for(unsigned i = 0; i < (sizeof(codes) / sizeof(codes[0])); ++i) {
 		if (q931.HasIE(codes[i])) {
 			q931.RemoveIE(codes[i]);
 		}
@@ -1137,7 +1105,7 @@ static PBoolean EmbedQSIGTunneledInfo(H323SignalPDU &pdu)
 			(*epType).m_supportedTunnelledProtocols.SetSize(0);
 		}
 		H225_ArrayOf_TunnelledProtocol &protos = (*epType).m_supportedTunnelledProtocols;
-		PBoolean addQSIG = TRUE;
+		BOOL addQSIG = TRUE;
 		for (int i = 0; i < protos.GetSize(); ++i)
 		{
 			if ((protos[i].GetTag() == H225_TunnelledProtocol_id::e_tunnelledProtocolObjectID) &&
@@ -1169,7 +1137,7 @@ static PBoolean EmbedQSIGTunneledInfo(H323SignalPDU &pdu)
 	return TRUE;
 }
 
-PBoolean MyH323Connection::EmbedTunneledInfo(H323SignalPDU &pdu)
+BOOL MyH323Connection::EmbedTunneledInfo(H323SignalPDU &pdu)
 {
 	if ((tunnelOptions & H323_TUNNEL_QSIG) || (remoteTunnelOptions & H323_TUNNEL_QSIG))
 		EmbedQSIGTunneledInfo(pdu);
@@ -1180,7 +1148,7 @@ PBoolean MyH323Connection::EmbedTunneledInfo(H323SignalPDU &pdu)
 }
 
 /* Handle tunneled messages */
-PBoolean MyH323Connection::HandleSignalPDU(H323SignalPDU &pdu)
+BOOL MyH323Connection::HandleSignalPDU(H323SignalPDU &pdu)
 {
 	if (pdu.GetQ931().HasIE(Q931::UserUserIE)) {
 		Q931 tunneledInfo;
@@ -1215,7 +1183,7 @@ PBoolean MyH323Connection::HandleSignalPDU(H323SignalPDU &pdu)
 }
 #endif
 
-PBoolean MyH323Connection::OnReceivedSignalSetup(const H323SignalPDU & setupPDU)
+BOOL MyH323Connection::OnReceivedSignalSetup(const H323SignalPDU & setupPDU)
 {
 	call_details_t cd;
 
@@ -1251,7 +1219,7 @@ PBoolean MyH323Connection::OnReceivedSignalSetup(const H323SignalPDU & setupPDU)
 	return H323Connection::OnReceivedSignalSetup(setupPDU);
 }
 
-PBoolean MyH323Connection::OnSendSignalSetup(H323SignalPDU & setupPDU)
+BOOL MyH323Connection::OnSendSignalSetup(H323SignalPDU & setupPDU)
 {
 	call_details_t cd;
 
@@ -1301,7 +1269,7 @@ PBoolean MyH323Connection::OnSendSignalSetup(H323SignalPDU & setupPDU)
 	return H323Connection::OnSendSignalSetup(setupPDU);
 }
 
-static PBoolean BuildFastStartList(const H323Channel & channel,
+static BOOL BuildFastStartList(const H323Channel & channel,
 		H225_ArrayOf_PASN_OctetString & array,
 		H323Channel::Directions reverseDirection)
 {
@@ -1490,7 +1458,7 @@ H323Connection::CallEndReason MyH323Connection::SendSignalSetup(const PString & 
 
 	signallingChannel->SetWriteTimeout(100);
 
-	PBoolean connectFailed = !signallingChannel->Connect();
+	BOOL connectFailed = !signallingChannel->Connect();
 
 	// Lock while checking for shutting down.
 	if (!Lock())
@@ -1565,14 +1533,14 @@ H323Connection::CallEndReason MyH323Connection::SendSignalSetup(const PString & 
 	setupPDU.GetQ931().GetCalledPartyNumber(remotePartyNumber);
 
 	fastStartState = FastStartDisabled;
-	PBoolean set_lastPDUWasH245inSETUP = FALSE;
+	BOOL set_lastPDUWasH245inSETUP = FALSE;
 
 	if (h245Tunneling && doH245inSETUP) {
 		h245TunnelTxPDU = &setupPDU;
 
 		// Try and start the master/slave and capability exchange through the tunnel
 		// Note: this used to be disallowed but is now allowed as of H323v4
-		PBoolean ok = StartControlNegotiations();
+		BOOL ok = StartControlNegotiations();
 
 		h245TunnelTxPDU = NULL;
 
@@ -1606,7 +1574,7 @@ H323Connection::CallEndReason MyH323Connection::SendSignalSetup(const PString & 
 }
 
 
-PBoolean MyH323Connection::OnSendReleaseComplete(H323SignalPDU & releaseCompletePDU)
+BOOL MyH323Connection::OnSendReleaseComplete(H323SignalPDU & releaseCompletePDU)
 {
 	if (h323debug) {
 		cout << "\t-- Sending RELEASE COMPLETE" << endl;
@@ -1621,7 +1589,7 @@ PBoolean MyH323Connection::OnSendReleaseComplete(H323SignalPDU & releaseComplete
 	return H323Connection::OnSendReleaseComplete(releaseCompletePDU);
 }
 
-PBoolean MyH323Connection::OnReceivedFacility(const H323SignalPDU & pdu)
+BOOL MyH323Connection::OnReceivedFacility(const H323SignalPDU & pdu)
 {
 	if (h323debug) {
 		cout << "\t-- Received Facility message... " << endl;
@@ -1639,7 +1607,7 @@ void MyH323Connection::OnReceivedReleaseComplete(const H323SignalPDU & pdu)
 	return H323Connection::OnReceivedReleaseComplete(pdu);
 }
 
-PBoolean MyH323Connection::OnClosingLogicalChannel(H323Channel & channel)
+BOOL MyH323Connection::OnClosingLogicalChannel(H323Channel & channel)
 {
 	if (h323debug) {
 		cout << "\t-- Closing logical channel..." << endl;
@@ -1662,8 +1630,7 @@ void MyH323Connection::SendUserInputTone(char tone, unsigned duration, unsigned 
 
 void MyH323Connection::OnUserInputTone(char tone, unsigned duration, unsigned logicalChannel, unsigned rtpTimestamp)
 {
-	/* Why we should check this? */
-	if ((dtmfMode & (H323_DTMF_CISCO | H323_DTMF_RFC2833 | H323_DTMF_SIGNAL)) != 0) {
+	if (dtmfMode == H323_DTMF_RFC2833) {
 		if (h323debug) {
 			cout << "\t-- Received user input tone (" << tone << ") from remote" << endl;
 		}
@@ -1693,11 +1660,11 @@ void MyH323Connection::OnSendCapabilitySet(H245_TerminalCapabilitySet & pdu)
 			H245_Capability & cap = entry.m_capability;
 			if (cap.GetTag() == H245_Capability::e_receiveRTPAudioTelephonyEventCapability) {
 				H245_AudioTelephonyEventCapability & atec = cap;
-				atec.m_dynamicRTPPayloadType = dtmfCodec[0];
-//				on_set_rfc2833_payload(GetCallReference(), (const char *)GetCallToken(), (int)dtmfCodec[0]);
+				atec.m_dynamicRTPPayloadType = dtmfCodec;
+//				on_set_rfc2833_payload(GetCallReference(), (const char *)GetCallToken(), (int)dtmfCodec);
 #ifdef PTRACING
 				if (h323debug) {
-					cout << "\t-- Receiving RFC2833 on payload " <<
+					cout << "\t-- Transmitting RFC2833 on payload " <<
 						atec.m_dynamicRTPPayloadType << endl;
 				}
 #endif
@@ -1712,7 +1679,7 @@ void MyH323Connection::OnSetLocalCapabilities()
 		on_setcapabilities(GetCallReference(), (const char *)callToken);
 }
 
-PBoolean MyH323Connection::OnReceivedCapabilitySet(const H323Capabilities & remoteCaps,
+BOOL MyH323Connection::OnReceivedCapabilitySet(const H323Capabilities & remoteCaps,
 							const H245_MultiplexCapability * muxCap,
 							H245_TerminalCapabilitySetReject & reject)
 {
@@ -1720,7 +1687,6 @@ PBoolean MyH323Connection::OnReceivedCapabilitySet(const H323Capabilities & remo
 		unsigned int asterisk_codec;
 		unsigned int h245_cap;
 		const char *oid;
-		const char *formatName;
 	};
 	static const struct __codec__ codecs[] = {
 		{ AST_FORMAT_G723_1, H245_AudioCapability::e_g7231 },
@@ -1729,7 +1695,6 @@ PBoolean MyH323Connection::OnReceivedCapabilitySet(const H323Capabilities & remo
 		{ AST_FORMAT_ALAW, H245_AudioCapability::e_g711Alaw64k },
 		{ AST_FORMAT_G729A, H245_AudioCapability::e_g729AnnexA },
 		{ AST_FORMAT_G729A, H245_AudioCapability::e_g729 },
-		{ AST_FORMAT_G726_AAL2, H245_AudioCapability::e_nonStandard, NULL, CISCO_G726r32 },
 #ifdef AST_FORMAT_MODEM
 		{ AST_FORMAT_MODEM, H245_DataApplicationCapability_application::e_t38fax },
 #endif
@@ -1751,12 +1716,23 @@ PBoolean MyH323Connection::OnReceivedCapabilitySet(const H323Capabilities & remo
 	};
 #endif
 	struct ast_codec_pref prefs;
-	RTP_DataFrame::PayloadTypes pt;
 
 	if (!H323Connection::OnReceivedCapabilitySet(remoteCaps, muxCap, reject)) {
 		return FALSE;
 	}
 
+	const H323Capability * cap = remoteCaps.FindCapability(H323_UserInputCapability::SubTypeNames[H323_UserInputCapability::SignalToneRFC2833]);
+	if (cap != NULL) {
+		RTP_DataFrame::PayloadTypes pt = ((H323_UserInputCapability*)cap)->GetPayloadType();
+		on_set_rfc2833_payload(GetCallReference(), (const char *)GetCallToken(), (int)pt);
+		if ((dtmfMode == H323_DTMF_RFC2833) && (sendUserInputMode == SendUserInputAsTone))
+			sendUserInputMode = SendUserInputAsInlineRFC2833;
+#ifdef PTRACING
+		if (h323debug) {
+			cout << "\t-- Inbound RFC2833 on payload " << pt << endl;
+		}
+#endif
+	}
 	memset(&prefs, 0, sizeof(prefs));
 	int peer_capabilities = 0;
 	for (int i = 0; i < remoteCapabilities.GetSize(); ++i) {
@@ -1767,7 +1743,7 @@ PBoolean MyH323Connection::OnReceivedCapabilitySet(const H323Capabilities & remo
 		switch(remoteCapabilities[i].GetMainType()) {
 		case H323Capability::e_Audio:
 			for (int x = 0; codecs[x].asterisk_codec > 0; ++x) {
-				if ((subType == codecs[x].h245_cap) && (!codecs[x].formatName || (!strcmp(codecs[x].formatName, (const char *)remoteCapabilities[i].GetFormatName())))) {
+				if (subType == codecs[x].h245_cap) {
 					int ast_codec = codecs[x].asterisk_codec;
 					int ms = 0;
 					if (!(peer_capabilities & ast_codec)) {
@@ -1776,6 +1752,8 @@ PBoolean MyH323Connection::OnReceivedCapabilitySet(const H323Capabilities & remo
 						format = ast_codec_pref_getsize(&prefs, ast_codec);
 						if ((ast_codec == AST_FORMAT_ALAW) || (ast_codec == AST_FORMAT_ULAW)) {
 							ms = remoteCapabilities[i].GetTxFramesInPacket();
+							if (ms > 60)
+								ms = format.cur_ms;
 						} else
 							ms = remoteCapabilities[i].GetTxFramesInPacket() * format.inc_ms;
 						ast_codec_pref_setsize(&prefs, ast_codec, ms);
@@ -1785,36 +1763,6 @@ PBoolean MyH323Connection::OnReceivedCapabilitySet(const H323Capabilities & remo
 					}
 					peer_capabilities |= ast_codec;
 				}
-			}
-			break;
-		case H323Capability::e_Data:
-			if (!strcmp((const char *)remoteCapabilities[i].GetFormatName(), CISCO_DTMF_RELAY)) {
-				pt = remoteCapabilities[i].GetPayloadType();
-				if ((dtmfMode & H323_DTMF_CISCO) != 0) {
-					on_set_rfc2833_payload(GetCallReference(), (const char *)GetCallToken(), (int)pt, 1);
-//					if (sendUserInputMode == SendUserInputAsTone)
-//						sendUserInputMode = SendUserInputAsInlineRFC2833;
-				}
-#ifdef PTRACING
-				if (h323debug) {
-					cout << "\t-- Outbound Cisco RTP DTMF on payload " << pt << endl;
-				}
-#endif
-			}
-			break;
-		case H323Capability::e_UserInput:
-			if (!strcmp((const char *)remoteCapabilities[i].GetFormatName(), H323_UserInputCapability::SubTypeNames[H323_UserInputCapability::SignalToneRFC2833])) {
-				pt = remoteCapabilities[i].GetPayloadType();
-				if ((dtmfMode & H323_DTMF_RFC2833) != 0) {
-					on_set_rfc2833_payload(GetCallReference(), (const char *)GetCallToken(), (int)pt, 0);
-//					if (sendUserInputMode == SendUserInputAsTone)
-//						sendUserInputMode = SendUserInputAsInlineRFC2833;
-				}
-#ifdef PTRACING
-				if (h323debug) {
-					cout << "\t-- Outbound RFC2833 on payload " << pt << endl;
-				}
-#endif
 			}
 			break;
 #if 0
@@ -1877,7 +1825,7 @@ H323Channel * MyH323Connection::CreateRealTimeLogicalChannel(const H323Capabilit
 /** This callback function is invoked once upon creation of each
   * channel for an H323 session
   */
-PBoolean MyH323Connection::OnStartLogicalChannel(H323Channel & channel)
+BOOL MyH323Connection::OnStartLogicalChannel(H323Channel & channel)
 {
 	/* Increase the count of channels we have open */
 	channelsOpen++;
@@ -1891,7 +1839,7 @@ PBoolean MyH323Connection::OnStartLogicalChannel(H323Channel & channel)
 	return connectionState != ShuttingDownConnection;
 }
 
-void MyH323Connection::SetCapabilities(int caps, int dtmf_mode, void *_prefs, int pref_codec)
+void MyH323Connection::SetCapabilities(int cap, int dtmf_mode, void *_prefs, int pref_codec)
 {
 	PINDEX lastcap = -1; /* last common capability index */
 	int alreadysent = 0;
@@ -1901,12 +1849,12 @@ void MyH323Connection::SetCapabilities(int caps, int dtmf_mode, void *_prefs, in
 	struct ast_codec_pref *prefs = (struct ast_codec_pref *)_prefs;
 	struct ast_format_list format;
 	int frames_per_packet;
-	H323Capability *cap;
+	int max_frames_per_packet;
 
 	localCapabilities.RemoveAll();
 
 	if (h323debug) {
-		cout << "Setting capabilities to " << ast_getformatname_multiple(caps_str, sizeof(caps_str), caps) << endl;
+		cout << "Setting capabilities to " << ast_getformatname_multiple(caps_str, sizeof(caps_str), cap) << endl;
 		ast_codec_pref_string(prefs, caps_str, sizeof(caps_str));
 		cout << "Capabilities in preference order is " << caps_str << endl;
 	}
@@ -1918,16 +1866,18 @@ void MyH323Connection::SetCapabilities(int caps, int dtmf_mode, void *_prefs, in
 		else if (y || (!(codec = ast_codec_pref_index(prefs, x)))) {
 			if (!y)
 				y = 1;
+			else if (y == AST_FORMAT_MAX_AUDIO)
+				break;
 			else
 				y <<= 1;
 			codec = y;
 		}
-		if (!(caps & codec) || (alreadysent & codec) || !(codec & AST_FORMAT_AUDIO_MASK))
+		if (!(cap & codec) || (alreadysent & codec) || !(codec & AST_FORMAT_AUDIO_MASK))
 			continue;
 		alreadysent |= codec;
-		/* format.cur_ms will be set to default if packetization is not explicitly set */
 		format = ast_codec_pref_getsize(prefs, codec);
 		frames_per_packet = (format.inc_ms ? format.cur_ms / format.inc_ms : format.cur_ms);
+		max_frames_per_packet = (format.inc_ms ? format.max_ms / format.inc_ms : 0);
 		switch(codec) {
 #if 0
 		case AST_FORMAT_SPEEX:
@@ -1947,35 +1897,37 @@ void MyH323Connection::SetCapabilities(int caps, int dtmf_mode, void *_prefs, in
 			AST_G729Capability *g729Cap;
 			lastcap = localCapabilities.SetCapability(0, 0, g729aCap = new AST_G729ACapability(frames_per_packet));
 			lastcap = localCapabilities.SetCapability(0, 0, g729Cap = new AST_G729Capability(frames_per_packet));
-			g729aCap->SetTxFramesInPacket(format.cur_ms);
-			g729Cap->SetTxFramesInPacket(format.cur_ms);
+			if (max_frames_per_packet) {
+				g729aCap->SetTxFramesInPacket(max_frames_per_packet);
+				g729Cap->SetTxFramesInPacket(max_frames_per_packet);
+			}
 			break;
 		case AST_FORMAT_G723_1:
 			AST_G7231Capability *g7231Cap;
 			lastcap = localCapabilities.SetCapability(0, 0, g7231Cap = new AST_G7231Capability(frames_per_packet, TRUE));
-			g7231Cap->SetTxFramesInPacket(format.cur_ms);
+			if (max_frames_per_packet)
+				g7231Cap->SetTxFramesInPacket(max_frames_per_packet);
 			lastcap = localCapabilities.SetCapability(0, 0, g7231Cap = new AST_G7231Capability(frames_per_packet, FALSE));
-			g7231Cap->SetTxFramesInPacket(format.cur_ms);
+			if (max_frames_per_packet)
+				g7231Cap->SetTxFramesInPacket(max_frames_per_packet);
 			break;
 		case AST_FORMAT_GSM:
 			AST_GSM0610Capability *gsmCap;
 			lastcap = localCapabilities.SetCapability(0, 0, gsmCap = new AST_GSM0610Capability(frames_per_packet));
-			gsmCap->SetTxFramesInPacket(format.cur_ms);
+			if (max_frames_per_packet)
+				gsmCap->SetTxFramesInPacket(max_frames_per_packet);
 			break;
 		case AST_FORMAT_ULAW:
 			AST_G711Capability *g711uCap;
 			lastcap = localCapabilities.SetCapability(0, 0, g711uCap = new AST_G711Capability(format.cur_ms, H323_G711Capability::muLaw));
-			g711uCap->SetTxFramesInPacket(format.cur_ms);
+			if (format.max_ms)
+				g711uCap->SetTxFramesInPacket(format.max_ms);
 			break;
 		case AST_FORMAT_ALAW:
 			AST_G711Capability *g711aCap;
 			lastcap = localCapabilities.SetCapability(0, 0, g711aCap = new AST_G711Capability(format.cur_ms, H323_G711Capability::ALaw));
-			g711aCap->SetTxFramesInPacket(format.cur_ms);
-			break;
-		case AST_FORMAT_G726_AAL2:
-			AST_CiscoG726Capability *g726Cap;
-			lastcap = localCapabilities.SetCapability(0, 0, g726Cap = new AST_CiscoG726Capability(frames_per_packet));
-			g726Cap->SetTxFramesInPacket(format.cur_ms);
+			if (format.max_ms)
+				g711aCap->SetTxFramesInPacket(format.max_ms);
 			break;
 		default:
 			alreadysent &= ~codec;
@@ -1983,68 +1935,27 @@ void MyH323Connection::SetCapabilities(int caps, int dtmf_mode, void *_prefs, in
 		}
 	}
 
-	cap = new H323_UserInputCapability(H323_UserInputCapability::HookFlashH245);
-	if (cap && cap->IsUsable(*this)) {
-		lastcap++;
-		lastcap = localCapabilities.SetCapability(0, lastcap, cap);
-	} else {
-		delete cap;				/* Capability is not usable */
-	}
+	lastcap++;
+	lastcap = localCapabilities.SetCapability(0, lastcap, new H323_UserInputCapability(H323_UserInputCapability::HookFlashH245));
 
+	lastcap++;
 	dtmfMode = dtmf_mode;
-	if (h323debug) {
-		cout << "DTMF mode is " << (int)dtmfMode << endl;
-	}
-	if (dtmfMode) {
-		lastcap++;
-		if (dtmfMode == H323_DTMF_INBAND) {
-			cap = new H323_UserInputCapability(H323_UserInputCapability::BasicString);
-			if (cap && cap->IsUsable(*this)) {
-				lastcap = localCapabilities.SetCapability(0, lastcap, cap);
-			} else {
-				delete cap;		/* Capability is not usable */
-			}	
-			sendUserInputMode = SendUserInputAsString;
-		} else {
-			if ((dtmfMode & H323_DTMF_RFC2833) != 0) {
-				cap = new H323_UserInputCapability(H323_UserInputCapability::SignalToneRFC2833);
-				if (cap && cap->IsUsable(*this))
-					lastcap = localCapabilities.SetCapability(0, lastcap, cap);
-				else {
-					dtmfMode |= H323_DTMF_SIGNAL;
-					delete cap;	/* Capability is not usable */
-				}
-			}
-			if ((dtmfMode & H323_DTMF_CISCO) != 0) {
-				/* Try Cisco's RTP DTMF relay too, but prefer RFC2833 or h245-signal */
-				cap = new AST_CiscoDtmfCapability();
-				if (cap && cap->IsUsable(*this)) {
-					lastcap = localCapabilities.SetCapability(0, lastcap, cap);
-					/* We cannot send Cisco RTP DTMFs, use h245-signal instead */
-					dtmfMode |= H323_DTMF_SIGNAL;
-				} else {
-					dtmfMode |= H323_DTMF_SIGNAL;
-					delete cap;	/* Capability is not usable */
-				}
-			}
-			if ((dtmfMode & H323_DTMF_SIGNAL) != 0) {
-				/* Cisco usually sends DTMF correctly only through h245-alphanumeric or h245-signal */
-				cap = new H323_UserInputCapability(H323_UserInputCapability::SignalToneH245);
-				if (cap && cap->IsUsable(*this))
-					lastcap = localCapabilities.SetCapability(0, lastcap, cap);
-				else
-					delete cap;	/* Capability is not usable */
-			}
-			sendUserInputMode = SendUserInputAsTone;	/* RFC2833 transmission handled at Asterisk level */
-		}
+	if (dtmf_mode == H323_DTMF_INBAND) {
+		localCapabilities.SetCapability(0, lastcap, new H323_UserInputCapability(H323_UserInputCapability::BasicString));
+		sendUserInputMode = SendUserInputAsString;
+	} else {
+		lastcap = localCapabilities.SetCapability(0, lastcap, new H323_UserInputCapability(H323_UserInputCapability::SignalToneRFC2833));
+		/* Cisco sends DTMF only through h245-alphanumeric or h245-signal, no support for RFC2833 */
+		lastcap = localCapabilities.SetCapability(0, lastcap, new H323_UserInputCapability(H323_UserInputCapability::SignalToneH245));
+		sendUserInputMode = SendUserInputAsTone;	/* RFC2833 transmission handled at Asterisk level */
 	}
 
 	if (h323debug) {
-		cout << "Allowed Codecs for " << GetCallToken() << " (" << GetSignallingChannel()->GetLocalAddress() << "):\n\t" << setprecision(2) << localCapabilities << endl;
+		cout << "Allowed Codecs:\n\t" << setprecision(2) << localCapabilities << endl;
 	}
 }
 
-PBoolean MyH323Connection::StartControlChannel(const H225_TransportAddress & h245Address)
+BOOL MyH323Connection::StartControlChannel(const H225_TransportAddress & h245Address)
 {
 	// Check that it is an IP address, all we support at the moment
 	if (h245Address.GetTag() != H225_TransportAddress::e_ipAddress
@@ -2068,7 +1979,7 @@ PBoolean MyH323Connection::StartControlChannel(const H225_TransportAddress & h24
 			cout << "Using " << addr << " for outbound H.245 transport" << endl;
 		controlChannel = new MyH323TransportTCP(endpoint, addr);
 	} else
-		controlChannel = new MyH323TransportTCP(endpoint);
+		controlChannel = new H323TransportTCP(endpoint);
 	if (!controlChannel->SetRemoteAddress(h245Address)) {
 		PTRACE(1, "H225\tCould not extract H245 address");
 		delete controlChannel;
@@ -2085,48 +1996,6 @@ PBoolean MyH323Connection::StartControlChannel(const H225_TransportAddress & h24
 	controlChannel->StartControlChannel(*this);
 	return TRUE;
 }
-
-#ifdef H323_H450
-void MyH323Connection::OnReceivedLocalCallHold(int linkedId)
-{
-	if (on_hold)
-		on_hold(GetCallReference(), (const char *)GetCallToken(), 1);
-}
-
-void MyH323Connection::OnReceivedLocalCallRetrieve(int linkedId)
-{
-	if (on_hold)
-		on_hold(GetCallReference(), (const char *)GetCallToken(), 0);
-}
-#endif
-
-void MyH323Connection::MyHoldCall(PBoolean isHold)
-{
-	if (((holdHandling & H323_HOLD_NOTIFY) != 0) || ((holdHandling & H323_HOLD_Q931ONLY) != 0)) {
-		PBYTEArray x ((const BYTE *)(isHold ? "\xF9" : "\xFA"), 1);
-		H323SignalPDU signal;
-		signal.BuildNotify(*this);
-		signal.GetQ931().SetIE((Q931::InformationElementCodes)39 /* Q931::NotifyIE */, x);
-		if (h323debug)
-			cout << "Sending " << (isHold ? "HOLD" : "RETRIEVE") << " notification: " << signal << endl;
-		if ((holdHandling & H323_HOLD_Q931ONLY) != 0) {
-			PBYTEArray rawData;
-			signal.GetQ931().RemoveIE(Q931::UserUserIE);
-			signal.GetQ931().Encode(rawData);
-			signallingChannel->WritePDU(rawData);
-		} else
-			WriteSignalPDU(signal);
-	}
-#ifdef H323_H450
-	if ((holdHandling & H323_HOLD_H450) != 0) {
-		if (isHold)
-			h4504handler->HoldCall(TRUE);
-		else if (IsLocalHold())
-			h4504handler->RetrieveCall();
-	}
-#endif
-}
-
 
 /* MyH323_ExternalRTPChannel */
 MyH323_ExternalRTPChannel::MyH323_ExternalRTPChannel(MyH323Connection & connection,
@@ -2148,7 +2017,7 @@ MyH323_ExternalRTPChannel::MyH323_ExternalRTPChannel(MyH323Connection & connecti
 		/* tell the H.323 stack */
 		SetExternalAddress(H323TransportAddress(localIpAddr, localPort), H323TransportAddress(localIpAddr, localPort + 1));
 		/* clean up allocated memory */
-		ast_free(info);
+		free(info);
 	}
 
 	/* Get the payload code	*/
@@ -2163,7 +2032,7 @@ MyH323_ExternalRTPChannel::~MyH323_ExternalRTPChannel()
 	}
 }
 
-PBoolean MyH323_ExternalRTPChannel::Start(void)
+BOOL MyH323_ExternalRTPChannel::Start(void)
 {
 	/* Call ancestor first */
 	if (!H323_ExternalRTPChannel::Start()) {
@@ -2190,7 +2059,7 @@ PBoolean MyH323_ExternalRTPChannel::Start(void)
 	return TRUE;
 }
 
-PBoolean MyH323_ExternalRTPChannel::OnReceivedAckPDU(const H245_H2250LogicalChannelAckParameters & param)
+BOOL MyH323_ExternalRTPChannel::OnReceivedAckPDU(const H245_H2250LogicalChannelAckParameters & param)
 {
 	if (h323debug) {
 		cout << "	MyH323_ExternalRTPChannel::OnReceivedAckPDU" << endl;
@@ -2208,32 +2077,6 @@ PBoolean MyH323_ExternalRTPChannel::OnReceivedAckPDU(const H245_H2250LogicalChan
 	}
 	return FALSE;
 }
-
-#ifdef H323_H450
-MyH4504Handler::MyH4504Handler(MyH323Connection &_conn, H450xDispatcher &_disp)
-	:H4504Handler(_conn, _disp)
-{
-	conn = &_conn;
-}
-
-void MyH4504Handler::OnReceivedLocalCallHold(int linkedId)
-{
-	if (conn) {
-		conn->Lock();
-		conn->OnReceivedLocalCallHold(linkedId);
-		conn->Unlock();
-	}
-}
-
-void MyH4504Handler::OnReceivedLocalCallRetrieve(int linkedId)
-{
-	if (conn) {
-		conn->Lock();
-		conn->OnReceivedLocalCallRetrieve(linkedId);
-		conn->Unlock();
-	}
-}
-#endif
 
 
 /** IMPLEMENTATION OF C FUNCTIONS */
@@ -2257,8 +2100,8 @@ void h323_end_point_create(void)
 {
 	channelsOpen = 0;
 	logstream = new PAsteriskLog();
-	PTrace::SetStream(logstream); 
-	endPoint = new MyH323EndPoint();
+	localProcess = new MyProcess();
+	localProcess->Main();
 }
 
 void h323_gk_urq(void)
@@ -2293,8 +2136,7 @@ void h323_callback_register(setup_incoming_cb		ifunc,
 							rfc2833_cb				dtmffunc,
 							hangup_cb				hangupfunc,
 							setcapabilities_cb		capabilityfunc,
-							setpeercapabilities_cb	peercapabilityfunc,
-							onhold_cb				holdfunc)
+							setpeercapabilities_cb	peercapabilityfunc)
 {
 	on_incoming_call = ifunc;
 	on_outgoing_call = sfunc;
@@ -2310,7 +2152,6 @@ void h323_callback_register(setup_incoming_cb		ifunc,
 	on_hangup = hangupfunc;
 	on_setcapabilities = capabilityfunc;
 	on_setpeercapabilities = peercapabilityfunc;
-	on_hold = holdfunc;
 }
 
 /**
@@ -2366,33 +2207,6 @@ int h323_start_listener(int listenPort, struct sockaddr_in bindaddr)
 	return 0;
 };
 
-/* Addition of functions just to make the channel driver compile with H323Plus */
-#if VERSION(OPENH323_MAJOR, OPENH323_MINOR, OPENH323_BUILD) > VERSION(1,19,4)
-/* Alternate RTP port information for Same NAT */
-BOOL MyH323_ExternalRTPChannel::OnReceivedAltPDU(const H245_ArrayOf_GenericInformation & alternate )
-{
-	return TRUE;
-}
-
-/* Alternate RTP port information for Same NAT */
-BOOL MyH323_ExternalRTPChannel::OnSendingAltPDU(H245_ArrayOf_GenericInformation & alternate) const
-{
-	return TRUE;
-}
-
-/* Alternate RTP port information for Same NAT */
-void MyH323_ExternalRTPChannel::OnSendOpenAckAlt(H245_ArrayOf_GenericInformation & alternate) const
-{
-}
-
-/* Alternate RTP port information for Same NAT */
-BOOL MyH323_ExternalRTPChannel::OnReceivedAckAltPDU(const H245_ArrayOf_GenericInformation & alternate)
-{
-	return TRUE;
-}
-#endif
-
-
 int h323_set_alias(struct oh323_alias *alias)
 {
 	char *p;
@@ -2408,7 +2222,7 @@ int h323_set_alias(struct oh323_alias *alias)
 
 	cout << "== Adding alias \"" << h323id << "\" to endpoint" << endl;
 	endPoint->AddAliasName(h323id);
-	endPoint->RemoveAliasName(PProcess::Current().GetName());
+	endPoint->RemoveAliasName(localProcess->GetUserName());
 
 	if (!e164.IsEmpty()) {
 		cout << "== Adding E.164 \"" << e164 << "\" to endpoint" << endl;
@@ -2422,7 +2236,7 @@ int h323_set_alias(struct oh323_alias *alias)
 			endPoint->SetGateway();
 		}
 		if (prefix)
-			ast_free(prefix);
+			free(prefix);
 	}
 	return 0;
 }
@@ -2441,11 +2255,6 @@ void h323_set_id(char *id)
 void h323_show_tokens(void)
 {
 	cout << "Current call tokens: " << setprecision(2) << endPoint->GetAllConnections() << endl;
-}
-
-void h323_show_version(void)
-{
-    cout << "H.323 version: " << OPENH323_MAJOR << "." << OPENH323_MINOR << "." << OPENH323_BUILD << endl;
 }
 
 /** Establish Gatekeeper communiations, if so configured,
@@ -2620,7 +2429,7 @@ int h323_answering_call(const char *token, int busy)
 int h323_soft_hangup(const char *data)
 {
 	PString token(data);
-	PBoolean result;
+	BOOL result;
 	cout << "Soft hangup" << endl;
 	result = endPoint->ClearCall(token);
 	return result;
@@ -2648,32 +2457,27 @@ void h323_native_bridge(const char *token, const char *them, char *capability)
 
 }
 
-int h323_hold_call(const char *token, int is_hold)
-{
-	MyH323Connection *conn = (MyH323Connection *)endPoint->FindConnectionWithLock(token);
-	if (!conn) {
-		cout << "ERROR: No connection found, this is bad" << endl;
-		return -1;
-	}
-	conn->MyHoldCall((PBoolean)is_hold);
-	conn->Unlock();
-	return 0;
-}
-
 #undef cout
 #undef endl
 void h323_end_process(void)
 {
 	if (endPoint) {
+		endPoint->ClearAllCalls();
+		endPoint->RemoveListener(NULL);
 		delete endPoint;
 		endPoint = NULL;
 	}
+	if (localProcess) {
+		delete localProcess;
+		localProcess = NULL;
 #ifndef SKIP_PWLIB_PIPE_BUG_WORKAROUND
-	close(_timerChangePipe[0]);
-	close(_timerChangePipe[1]);
+		close(_timerChangePipe[0]);
+		close(_timerChangePipe[1]);
 #endif
+	}
 	if (logstream) {
-		PTrace::SetStream(NULL);
+		PTrace::SetLevel(0);
+		PTrace::SetStream(&cout);
 		delete logstream;
 		logstream = NULL;
 	}

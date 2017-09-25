@@ -150,7 +150,7 @@ __bt_stkacq(t, hp, c)
 	EPG *e;
 	EPGNO *parent;
 	PAGE *h;
-	indx_t idx = 0;
+	indx_t index = 0;
 	pgno_t pgno;
 	recno_t nextpg, prevpg;
 	int exact, level;
@@ -188,8 +188,8 @@ __bt_stkacq(t, hp, c)
 
 			/* Move to the next index. */
 			if (parent->index != NEXTINDEX(h) - 1) {
-				idx = parent->index + 1;
-				BT_PUSH(t, h->pgno, idx);
+				index = parent->index + 1;
+				BT_PUSH(t, h->pgno, index);
 				break;
 			}
 			mpool_put(t->bt_mp, h, 0);
@@ -198,7 +198,7 @@ __bt_stkacq(t, hp, c)
 		/* Restore the stack. */
 		while (level--) {
 			/* Push the next level down onto the stack. */
-			bi = GETBINTERNAL(h, idx);
+			bi = GETBINTERNAL(h, index);
 			pgno = bi->pgno;
 			BT_PUSH(t, pgno, 0);
 
@@ -208,7 +208,7 @@ __bt_stkacq(t, hp, c)
 			/* Get the next level down. */
 			if ((h = mpool_get(t->bt_mp, pgno, 0)) == NULL)
 				return (1);
-			idx = 0;
+			index = 0;
 		}
 		mpool_put(t->bt_mp, h, 0);
 		if ((h = mpool_get(t->bt_mp, nextpg, 0)) == NULL)
@@ -243,8 +243,8 @@ __bt_stkacq(t, hp, c)
 
 			/* Move to the next index. */
 			if (parent->index != 0) {
-				idx = parent->index - 1;
-				BT_PUSH(t, h->pgno, idx);
+				index = parent->index - 1;
+				BT_PUSH(t, h->pgno, index);
 				break;
 			}
 			mpool_put(t->bt_mp, h, 0);
@@ -253,7 +253,7 @@ __bt_stkacq(t, hp, c)
 		/* Restore the stack. */
 		while (level--) {
 			/* Push the next level down onto the stack. */
-			bi = GETBINTERNAL(h, idx);
+			bi = GETBINTERNAL(h, index);
 			pgno = bi->pgno;
 
 			/* Lose the currently pinned page. */
@@ -263,8 +263,8 @@ __bt_stkacq(t, hp, c)
 			if ((h = mpool_get(t->bt_mp, pgno, 0)) == NULL)
 				return (1);
 
-			idx = NEXTINDEX(h) - 1;
-			BT_PUSH(t, pgno, idx);
+			index = NEXTINDEX(h) - 1;
+			BT_PUSH(t, pgno, index);
 		}
 		mpool_put(t->bt_mp, h, 0);
 		if ((h = mpool_get(t->bt_mp, prevpg, 0)) == NULL)
@@ -382,7 +382,7 @@ __bt_pdelete(t, h)
 	BINTERNAL *bi;
 	PAGE *pg;
 	EPGNO *parent;
-	indx_t cnt, idx, *ip, offset;
+	indx_t cnt, index, *ip, offset;
 	u_int32_t nksize;
 	char *from;
 
@@ -403,8 +403,8 @@ __bt_pdelete(t, h)
 		if ((pg = mpool_get(t->bt_mp, parent->pgno, 0)) == NULL)
 			return (RET_ERROR);
 
-		idx = parent->index;
-		bi = GETBINTERNAL(pg, idx);
+		index = parent->index;
+		bi = GETBINTERNAL(pg, index);
 
 		/* Free any overflow pages. */
 		if (bi->flags & P_BIGKEY &&
@@ -436,11 +436,11 @@ __bt_pdelete(t, h)
 			pg->upper += nksize;
 
 			/* Adjust indices' offsets, shift the indices down. */
-			offset = pg->linp[idx];
-			for (cnt = idx, ip = &pg->linp[0]; cnt--; ++ip)
+			offset = pg->linp[index];
+			for (cnt = index, ip = &pg->linp[0]; cnt--; ++ip)
 				if (ip[0] < offset)
 					ip[0] += nksize;
-			for (cnt = NEXTINDEX(pg) - idx; --cnt; ++ip)
+			for (cnt = NEXTINDEX(pg) - index; --cnt; ++ip)
 				ip[0] = ip[1] < offset ? ip[1] + nksize : ip[1];
 			pg->lower -= sizeof(indx_t);
 		}
@@ -471,11 +471,11 @@ __bt_pdelete(t, h)
  *	RET_SUCCESS, RET_ERROR.
  */
 int
-__bt_dleaf(t, key, h, idx)
+__bt_dleaf(t, key, h, index)
 	BTREE *t;
 	const DBT *key;
 	PAGE *h;
-	u_int idx;
+	u_int index;
 {
 	BLEAF *bl;
 	indx_t cnt, *ip, offset;
@@ -486,12 +486,12 @@ __bt_dleaf(t, key, h, idx)
 	/* If this record is referenced by the cursor, delete the cursor. */
 	if (F_ISSET(&t->bt_cursor, CURS_INIT) &&
 	    !F_ISSET(&t->bt_cursor, CURS_ACQUIRE) &&
-	    t->bt_cursor.pg.pgno == h->pgno && t->bt_cursor.pg.index == idx &&
-	    __bt_curdel(t, key, h, idx))
+	    t->bt_cursor.pg.pgno == h->pgno && t->bt_cursor.pg.index == index &&
+	    __bt_curdel(t, key, h, index))
 		return (RET_ERROR);
 
 	/* If the entry uses overflow pages, make them available for reuse. */
-	to = bl = GETBLEAF(h, idx);
+	to = bl = GETBLEAF(h, index);
 	if (bl->flags & P_BIGKEY && __ovfl_delete(t, bl->bytes) == RET_ERROR)
 		return (RET_ERROR);
 	if (bl->flags & P_BIGDATA &&
@@ -505,18 +505,18 @@ __bt_dleaf(t, key, h, idx)
 	h->upper += nbytes;
 
 	/* Adjust the indices' offsets, shift the indices down. */
-	offset = h->linp[idx];
-	for (cnt = idx, ip = &h->linp[0]; cnt--; ++ip)
+	offset = h->linp[index];
+	for (cnt = index, ip = &h->linp[0]; cnt--; ++ip)
 		if (ip[0] < offset)
 			ip[0] += nbytes;
-	for (cnt = NEXTINDEX(h) - idx; --cnt; ++ip)
+	for (cnt = NEXTINDEX(h) - index; --cnt; ++ip)
 		ip[0] = ip[1] < offset ? ip[1] + nbytes : ip[1];
 	h->lower -= sizeof(indx_t);
 
 	/* If the cursor is on this page, adjust it as necessary. */
 	if (F_ISSET(&t->bt_cursor, CURS_INIT) &&
 	    !F_ISSET(&t->bt_cursor, CURS_ACQUIRE) &&
-	    t->bt_cursor.pg.pgno == h->pgno && t->bt_cursor.pg.index > idx)
+	    t->bt_cursor.pg.pgno == h->pgno && t->bt_cursor.pg.index > index)
 		--t->bt_cursor.pg.index;
 
 	return (RET_SUCCESS);
@@ -536,11 +536,11 @@ __bt_dleaf(t, key, h, idx)
  *	RET_SUCCESS, RET_ERROR.
  */
 static int
-__bt_curdel(t, key, h, idx)
+__bt_curdel(t, key, h, index)
 	BTREE *t;
 	const DBT *key;
 	PAGE *h;
-	u_int idx;
+	u_int index;
 {
 	CURSOR *c;
 	EPG e;
@@ -563,7 +563,7 @@ __bt_curdel(t, key, h, idx)
 		 */
 		if (key == NULL) {
 			e.page = h;
-			e.index = idx;
+			e.index = index;
 			if ((status = __bt_ret(t, &e,
 			    &c->key, &c->key, NULL, NULL, 1)) != RET_SUCCESS)
 				return (status);
@@ -571,25 +571,25 @@ __bt_curdel(t, key, h, idx)
 			key = &c->key;
 		}
 		/* Check previous key, if not at the beginning of the page. */
-		if (idx > 0) {
+		if (index > 0) {
 			e.page = h;
-			e.index = idx - 1;
+			e.index = index - 1;
 			if (__bt_cmp(t, key, &e) == 0) {
 				F_SET(c, CURS_BEFORE);
 				goto dup2;
 			}
 		}
 		/* Check next key, if not at the end of the page. */
-		if (idx < NEXTINDEX(h) - 1) {
+		if (index < NEXTINDEX(h) - 1) {
 			e.page = h;
-			e.index = idx + 1;
+			e.index = index + 1;
 			if (__bt_cmp(t, key, &e) == 0) {
 				F_SET(c, CURS_AFTER);
 				goto dup2;
 			}
 		}
 		/* Check previous key if at the beginning of the page. */
-		if (idx == 0 && h->prevpg != P_INVALID) {
+		if (index == 0 && h->prevpg != P_INVALID) {
 			if ((pg = mpool_get(t->bt_mp, h->prevpg, 0)) == NULL)
 				return (RET_ERROR);
 			e.page = pg;
@@ -601,7 +601,7 @@ __bt_curdel(t, key, h, idx)
 			mpool_put(t->bt_mp, pg, 0);
 		}
 		/* Check next key if at the end of the page. */
-		if (idx == NEXTINDEX(h) - 1 && h->nextpg != P_INVALID) {
+		if (index == NEXTINDEX(h) - 1 && h->nextpg != P_INVALID) {
 			if ((pg = mpool_get(t->bt_mp, h->nextpg, 0)) == NULL)
 				return (RET_ERROR);
 			e.page = pg;
@@ -617,7 +617,7 @@ dup2:				c->pg.pgno = e.page->pgno;
 		}
 	}
 	e.page = h;
-	e.index = idx;
+	e.index = index;
 	if (curcopy || (status =
 	    __bt_ret(t, &e, &c->key, &c->key, NULL, NULL, 1)) == RET_SUCCESS) {
 		F_SET(c, CURS_ACQUIRE);

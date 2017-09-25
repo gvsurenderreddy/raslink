@@ -5,18 +5,18 @@
  * with no warranty of any kind
  */
 
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <string.h>
+#include <sys/select.h>
+
 #include "asterisk.h"
 
-#define AUDIO_FILENO (STDERR_FILENO + 1)
+#include "asterisk/compat.h"
 
-/*! \file
- * Extended AGI test application
- *
- * This code is released into the public domain
- * with no warranty of any kind
- *
- * \ingroup agi
- */
+#define AUDIO_FILENO (STDERR_FILENO + 1)
 
 static int read_environment(void)
 {
@@ -24,9 +24,7 @@ static int read_environment(void)
 	char *val;
 	/* Read environment */
 	for(;;) {
-		if (!fgets(buf, sizeof(buf), stdin)) {
-			return -1;
-		}
+		fgets(buf, sizeof(buf), stdin);
 		if (feof(stdin))
 			return -1;
 		buf[strlen(buf) - 1] = '\0';
@@ -70,9 +68,7 @@ static char *wait_result(void)
 			return NULL;
 		}
 		if (FD_ISSET(STDIN_FILENO, &fds)) {
-			if (!fgets(astresp, sizeof(astresp), stdin)) {
-				return NULL;
-			}
+			fgets(astresp, sizeof(astresp), stdin);
 			if (feof(stdin)) {
 				fprintf(stderr, "Got hungup on apparently\n");
 				return NULL;
@@ -156,7 +152,7 @@ int main(int argc, char *argv[])
 	}
 	tmp = getenv("agi_enhanced");
 	if (tmp) {
-		if (sscanf(tmp, "%30d.%30d", &ver, &subver) != 2)
+		if (sscanf(tmp, "%d.%d", &ver, &subver) != 2)
 			ver = 0;
 	}
 	if (ver < 1) {
