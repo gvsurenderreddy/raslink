@@ -74,7 +74,7 @@ ifdown $wificard &>/dev/null
 sleep 0.5s
 ifup $wificard &>/dev/null
 sleep 10s
-if [[ $(ifconfig $wificard | grep -c "inet addr:") = "1" ]]; then
+if [[ $(ifconfig ${wificard} | grep -ic "inet addr:") == "1" ]]; then
   echo "***Connection Active***"
   sleep 0.5s
   echo "displaying connection information"
