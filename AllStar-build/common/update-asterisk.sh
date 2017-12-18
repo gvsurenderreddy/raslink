@@ -20,7 +20,8 @@
 echo "Building asterisk..."
 cd /usr/src/utils/astsrc/asterisk/
 # Put git commit number where asterisk makefile expects it
-git describe --always >/usr/src/utils/astsrc/asterisk/.version
+touch .version
+git describe --always > .version
 # Configure the build process
 (export PTLIB_CONFIG=/usr/share/ptlib/make/ptlib-config;./configure CXX=g++-4.8 CC=gcc-4.8)
 # Build and install Asterisk
