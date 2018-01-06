@@ -1,5 +1,5 @@
 #!/bin/sh
 
-VERSION="GIT Version "$(git describe --always)
-echo "${VERSION}"
-echo "${VERSION}" > .version
+version="Git Version "$(git describe --always)
+echo "${version}"
+echo "${version}" > .version
