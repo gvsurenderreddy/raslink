@@ -31,6 +31,6 @@ Please see <https://jlappliedtechnologies.com/raslink/> for assistance."
 echo "Building Uridiag..."
 cd /usr/src/utils/astsrc/uridiag/
 status make
-status make install)
+status make install
 echo "Done"
 exit 0
