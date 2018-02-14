@@ -55,8 +55,7 @@ sed -i '/app_sendtext.so/c\load \=> app_sendtext.so ;   Send Text Applications  
 # Add low pass and high pass filter configuration to usbradio
 filters=$(grep -ic 'rxlpf' /etc/asterisk/usbradio.conf)
 if [[ $filters = "0" ]]; then
-  echo "
-rxlpf = 0     ; Receiver Audio Low Pass Filter 0,1,2
+  echo "rxlpf = 0     ; Receiver Audio Low Pass Filter 0,1,2
       ; 0 - 3.0 kHz cutoff (Default) value for reduced noise and increased intelligibility. (default)
       ; 1 - 3.3 kHz cutoff for increased high end, sibilance and brightness.
       ; 2 - 3.5 kHz cutoff for even more high end, sibilance and brightness.
