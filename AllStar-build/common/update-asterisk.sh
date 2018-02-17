@@ -56,7 +56,8 @@ sed -i '/app_sendtext.so/c\load \=> app_sendtext.so ;   Send Text Applications  
 filters=$(grep -ic 'rxlpf' /etc/asterisk/usbradio.conf)
 if [[ $filters = "0" ]]; then
   sed -i '/jblog \= no/a\
-  rxlpf = 0     ; Receiver Audio Low Pass Filter 0,1,2\
+\
+rxlpf = 0     ; Receiver Audio Low Pass Filter 0,1,2\
       ; 0 - 3.0 kHz cutoff (Default) value for reduced noise and increased intelligibility. (default)\
       ; 1 - 3.3 kHz cutoff for increased high end, sibilance and brightness.\
       ; 2 - 3.5 kHz cutoff for even more high end, sibilance and brightness.\
@@ -80,15 +81,14 @@ fi
 sed -i 's/jbmaxsize \= 500/jbmaxsize \= 250/' /etc/asterisk/usbradio*
 sed -i 's/jbmaxsize \= 200/jbmaxsize \= 250/' /etc/asterisk/usbradio*
 # Add g726aal2 codec to iax configuration
-sed -i '/\<\; followed by ADPCM\, and lastly GSM\,\>/c\; followed by ADPCM\/g726aal2, and lastly GSM.' /etc/asterisk/iax.conf
+sed -i '/\<\; followed by ADPCM, and lastly GSM,\>/c\
+\; followed by ADPCM\/g726aal2, and lastly GSM.' /etc/asterisk/iax.conf
 sed -i '/\<     ; ULAW          best                    87 kbps\>/a\
      ; g726aal2         good                    55 kbps' /etc/asterisk/iax.conf
 adpcm=$(grep -c 'allow = adpcm' /etc/asterisk/iax.conf)
 g726aal2=$(grep -c 'allow = g726aal2' /etc/asterisk/iax.conf)
 if [[ $g726aal2 = "0" ]]; then
-  sed -i '/\<allow \= ulaw     ; best  87 kbps\>/a\
-allow \= g726aal2     \; good  55 kbps' /etc/asterisk/iax.conf
-  sed -i '/\<allow \= ulaw\>/a\
+  sed -i '/\<allow \= ulaw\>/2ga\
 allow \= g726aal2' /etc/asterisk/iax.conf
 fi
 if [[ $adpcm = "0" ]]; then
