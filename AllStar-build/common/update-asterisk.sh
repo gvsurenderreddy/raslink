@@ -89,8 +89,7 @@ g726aal2=$(grep -c 'allow = g726aal2' /etc/asterisk/iax.conf)
 if [[ $g726aal2 = "0" ]]; then
 sed -i '/\<allow \= ulaw     ; best  87 kbps\>/a\
 allow \= g726aal2     ; good  55 kbps' /etc/asterisk/iax.conf
-  sed -i '/^allow \= ulaw/a\
-allow \= g726aal2' /etc/asterisk/iax.conf
+  sed -i 's/allow \= ulaw/&\nallow \= g726aal2/2g' /etc/asterisk/iax.conf
 fi
 if [[ $adpcm = "0" ]]; then
   sed -i '/\<allow \= g726aal2\>/a\
