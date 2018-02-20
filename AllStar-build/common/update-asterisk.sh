@@ -95,7 +95,7 @@ if [[ $g726aal2 = "0" ]]; then
   sed -i '/allow \= adpcm     ; good  55 kbps/i\
 allow \= g726aal2     ; good  55 kbps' /etc/asterisk/iax.conf
 # old layout
-  sed -i 's/\t/g' /etc/asterisk/iax.conf
+  sed -i 's/\t/ /g' /etc/asterisk/iax.conf
   sed -i '/allow \= adpcm   ; good  55 kbps/i\
 allow \= g726aal2   ; good  55 kbps' /etc/asterisk/iax.conf
 # both layouts
