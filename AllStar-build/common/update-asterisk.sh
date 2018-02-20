@@ -81,19 +81,21 @@ fi
 sed -i 's/jbmaxsize \= 500/jbmaxsize \= 250/' /etc/asterisk/usbradio*
 sed -i 's/jbmaxsize \= 200/jbmaxsize \= 250/' /etc/asterisk/usbradio*
 # Add g726aal2 codec to iax configuration
-sed -i '/\<\ followed by ADPCM, and lastly GSM,\>/c\followed by ADPCM\/g726aal2, and lastly GSM.' /etc/asterisk/iax.conf
-sed -i '/\<ULAW          best                    87 kbps\>/a\
-     ; g726aal2         good                    55 kbps' /etc/asterisk/iax.conf
+sed -i 's/ulaw, alaw, GSM and ADPCM should only be used,/ulaw, GSM, g726aal2 and ADPCM should only be used,/' /etc/asterisk/iax.conf
+sed -i 's/The ulaw and alaw codecs have/The ulaw codec has/' /etc/asterisk/iax.conf
+sed -i 's/followed by ADPCM, and lastly GSM,/followed by ADPCM\/g726aal2, and lastly GSM./' /etc/asterisk/iax.conf
+sed -i 's/alaw\/ulaw/ulaw/' /etc/asterisk/iax.conf
 adpcm=$(grep -c 'allow = adpcm' /etc/asterisk/iax.conf)
 g726aal2=$(grep -c 'allow = g726aal2' /etc/asterisk/iax.conf)
 if [[ $g726aal2 = "0" ]]; then
-sed -i '/\<allow \= ulaw     ; best  87 kbps\>/a\
+  sed -i '/ULAW          best                    87 kbps/a\
+     ; g726aal2         good                    55 kbps' /etc/asterisk/iax.conf
+  sed -i '/allow \= adpcm     ; good  55 kbps/i\
 allow \= g726aal2     ; good  55 kbps' /etc/asterisk/iax.conf
-  sed -i 's/allow \= ulaw/&\nallow \= g726aal2/2g' /etc/asterisk/iax.conf
+  sed -i '/^allow \= ulaw$/ s:$:\nallow \= g726aal2:' /etc/asterisk/iax.conf
 fi
 if [[ $adpcm = "0" ]]; then
-  sed -i '/\<allow \= g726aal2\>/a\
-allow \= adpcm' /etc/asterisk/iax.conf
+  sed -i '/^allow \= g726aal2$/ s:$:\nallow \= adpcm:' /etc/asterisk/iax.conf
 fi
 echo "Done."
 exit 0
