@@ -20,4 +20,5 @@
 rm -rf /tmp/* /tmp/.* /var/tmp/* /var/tmp/*.* &>/dev/null
 mount -t tmpfs -o noexec,nodev,nosuid,mode=1777,size=100m tmpfs /tmp
 mount -t tmpfs -o noexec,nodev,nosuid,mode=1777,size=30m tmpfs /var/tmp
+mount -o remount,size=128M /dev/shm
 exit 0
