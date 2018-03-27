@@ -109,4 +109,5 @@ sync
 sudo service asterisk start
 echo "Done"
 date > /root/.lastupdate
+sleep 1
 exit 0
