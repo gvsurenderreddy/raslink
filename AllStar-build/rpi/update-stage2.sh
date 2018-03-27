@@ -125,7 +125,6 @@ echo "The update is complete."
 echo "You can run this tool at any time by typing 'system-update' at a root prompt."
 date > /root/.lastupdate
 echo "Rebooting to apply changes."
-sleep 2
 sync
 sudo reboot
 exit 0
