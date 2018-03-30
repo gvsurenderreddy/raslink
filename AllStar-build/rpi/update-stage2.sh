@@ -23,7 +23,7 @@ if [ -z "$STY" ]; then exec screen -S system-update /bin/bash "$0"; fi
 status() {
     $@
     if [ $? -ne 0 ]; then
-        exit $?
+        exit 1
     fi
 }
 echo "Running update, stage two."
